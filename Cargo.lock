@@ -129,10 +129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5202b64bef2b2c42a7f6e2e5b40fa83dd04aa61fdb08bfd116553adc149fe47a"
 
 [[package]]
-name = "force-build"
-version = "0.0.0"
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -337,6 +333,14 @@ name = "target-lexicon"
 version = "0.12.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1fc403891a21bcfb7c37834ba66a547a8f402146eba7265b5a6d88059c9ff2f"
+
+[[package]]
+name = "test"
+version = "0.1.1"
+dependencies = [
+ "egui_pysync_client",
+ "egui_pysync_server",
+]
 
 [[package]]
 name = "ttf-parser"

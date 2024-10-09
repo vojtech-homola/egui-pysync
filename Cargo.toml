@@ -16,9 +16,10 @@ egui_pysync_transport = { path = "egui-pysync-transport" }
 egui_pysync_macros = { path = "egui-pysync-macros" }
 
 [package]
-name = "force-build"
+name = "test"
 edition.workspace = true
+version.workspace = true
 
-[[bin]]
-name = "force-build"
-path = "main.rs"
+[dependencies]
+egui_pysync_server = {path = "egui-pysync-server"}
+egui_pysync_client = {path = "egui-pysync-client"}
