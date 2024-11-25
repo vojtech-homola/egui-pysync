@@ -2,14 +2,15 @@ use std::hash::Hash;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use egui_pytransport::collections::CollectionItem;
-use egui_pytransport::transport::WriteMessage;
-use egui_pytransport::values::{ReadValue, WriteValue};
-use egui_pytransport::{EnumInt, NoHashMap};
+use egui_pysync::collections::CollectionItem;
+use egui_pysync::graphs::GraphElement;
+use egui_pysync::transport::WriteMessage;
+use egui_pysync::values::{ReadValue, WriteValue};
+use egui_pysync::{EnumInt, NoHashMap};
 
 use crate::dict::{DictUpdate, ValueDict};
-use crate::graphs::{GraphType, GraphUpdate, ValueGraph};
-use crate::image::{ImageUpdate, ImageValue};
+use crate::graphs::{GraphUpdate, ValueGraphs};
+use crate::image::{ImageUpdate, ValueImage};
 use crate::list::{ListUpdate, ValueList};
 use crate::values::{Signal, Value, ValueEnum, ValueStatic, ValueUpdate};
 
@@ -55,7 +56,7 @@ pub struct ValuesCreator {
 impl ValuesCreator {
     pub(crate) fn new(channel: Sender<WriteMessage>) -> Self {
         Self {
-            counter: 10, // first 10 values are reserved for special values
+            counter: 9, // first 10 values are reserved for special values
             val: ValuesList::new(),
             version: 0,
             channel,
@@ -63,9 +64,11 @@ impl ValuesCreator {
     }
 
     fn get_id(&mut self) -> u32 {
-        let count = self.counter;
+        if self.counter > 16777215 {
+            panic!("id counter overflow, id is 24bit long");
+        }
         self.counter += 1;
-        count
+        self.counter
     }
 
     pub(crate) fn get_values(self) -> (ValuesList, u64) {
@@ -89,7 +92,7 @@ impl ValuesCreator {
         value
     }
 
-    pub fn add_static_value<T>(&mut self, value: T) -> Arc<ValueStatic<T>>
+    pub fn add_static<T>(&mut self, value: T) -> Arc<ValueStatic<T>>
     where
         T: ReadValue + 'static,
     {
@@ -100,9 +103,9 @@ impl ValuesCreator {
         value
     }
 
-    pub fn add_image(&mut self) -> Arc<ImageValue> {
+    pub fn add_image(&mut self) -> Arc<ValueImage> {
         let id = self.get_id();
-        let value = ImageValue::new(id);
+        let value = ValueImage::new(id);
 
         self.val.images.insert(id, value.clone());
         value
@@ -146,9 +149,9 @@ impl ValuesCreator {
         value
     }
 
-    pub fn add_graph<T: GraphType + 'static>(&mut self) -> Arc<ValueGraph<T>> {
+    pub fn add_graphs<T: GraphElement + 'static>(&mut self) -> Arc<ValueGraphs<T>> {
         let id = self.get_id();
-        let value = ValueGraph::new(id);
+        let value = ValueGraphs::new(id);
 
         self.val.graphs.insert(id, value.clone());
         value

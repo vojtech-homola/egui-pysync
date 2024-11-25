@@ -4,17 +4,17 @@ use std::sync::{Arc, RwLock};
 
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
+use pyo3::types::PyList;
 
-use egui_pytransport::collections::CollectionItem;
-use egui_pytransport::list::ListMessage;
-use egui_pytransport::transport::WriteMessage;
+use egui_pysync::collections::CollectionItem;
+use egui_pysync::list::ListMessage;
+use egui_pysync::transport::WriteMessage;
 
-use crate::py_convert::FromPyValue;
-use crate::SyncTrait;
+use crate::{SyncTrait, ToPython};
 
 pub(crate) trait PyListTrait: Send + Sync {
-    fn get_py(&self, py: Python) -> PyObject;
-    fn get_item_py(&self, py: Python, idx: usize) -> PyResult<PyObject>;
+    fn get_py<'py>(&self, py: Python<'py>) -> Bound<'py, PyList>;
+    fn get_item_py<'py>(&self, py: Python<'py>, idx: usize) -> PyResult<Bound<'py, PyAny>>;
     fn set_py(&self, list: &Bound<PyAny>, update: bool) -> PyResult<()>;
     fn set_item_py(&self, idx: usize, value: &Bound<PyAny>, update: bool) -> PyResult<()>;
     fn add_item_py(&self, value: &Bound<PyAny>, update: bool) -> PyResult<()>;
@@ -46,27 +46,32 @@ impl<T> ValueList<T> {
 
 impl<T> PyListTrait for ValueList<T>
 where
-    T: CollectionItem + ToPyObject + FromPyValue,
+    T: CollectionItem + ToPython + for<'py> FromPyObject<'py>,
 {
-    fn get_py(&self, py: Python) -> PyObject {
-        let list = self.list.read().unwrap().to_object(py);
-        list.into()
+    fn get_py<'py>(&self, py: Python<'py>) -> Bound<'py, PyList> {
+        let list = self.list.read().unwrap().clone();
+        let py_list = PyList::empty(py);
+        for val in list.iter() {
+            let val = val.to_python(py);
+            py_list.append(val).unwrap();
+        }
+        py_list
     }
 
-    fn get_item_py(&self, py: Python, idx: usize) -> PyResult<PyObject> {
+    fn get_item_py<'py>(&self, py: Python<'py>, idx: usize) -> PyResult<Bound<'py, PyAny>> {
         let list = self.list.read().unwrap();
         if idx >= list.len() {
             return Err(PyIndexError::new_err("list index out of range"));
         }
 
-        Ok(list[idx].to_object(py))
+        Ok(list[idx].to_python(py))
     }
 
     fn set_py(&self, list: &Bound<PyAny>, update: bool) -> PyResult<()> {
         let list = list.downcast::<pyo3::types::PyList>()?;
         let mut data = Vec::new();
         for val in list {
-            data.push(T::from_python(&val)?);
+            data.push(val.extract()?);
         }
 
         let mut l = self.list.write().unwrap();
@@ -84,7 +89,7 @@ where
     }
 
     fn set_item_py(&self, idx: usize, value: &Bound<PyAny>, update: bool) -> PyResult<()> {
-        let value = T::from_python(&value)?;
+        let value: T = value.extract()?;
         let mut list = self.list.write().unwrap();
         if idx >= list.len() {
             return Err(PyIndexError::new_err("list index out of range"));
@@ -119,7 +124,7 @@ where
     }
 
     fn add_item_py(&self, value: &Bound<PyAny>, update: bool) -> PyResult<()> {
-        let value = T::from_python(&value)?;
+        let value: T = value.extract()?;
 
         let mut list = self.list.write().unwrap();
         if self.connected.load(Ordering::Relaxed) {

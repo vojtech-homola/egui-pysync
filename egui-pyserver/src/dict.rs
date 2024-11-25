@@ -6,17 +6,17 @@ use std::sync::{Arc, RwLock};
 
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
-use egui_pytransport::collections::CollectionItem;
-use egui_pytransport::dict::DictMessage;
-use egui_pytransport::transport::WriteMessage;
+use egui_pysync::collections::CollectionItem;
+use egui_pysync::dict::DictMessage;
+use egui_pysync::transport::WriteMessage;
 
-use crate::py_convert::FromPyValue;
-use crate::SyncTrait;
+use crate::{SyncTrait, ToPython};
 
-pub(crate) trait PyDict: Send + Sync {
-    fn get_py(&self, py: Python) -> PyObject;
-    fn get_item_py(&self, key: &Bound<PyAny>) -> PyResult<PyObject>;
+pub(crate) trait PyDictTrait: Send + Sync {
+    fn get_py<'py>(&self, py: Python<'py>) -> Bound<'py, PyDict>;
+    fn get_item_py<'py>(&self, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>>;
     fn set_py(&self, dict: &Bound<PyAny>, update: bool) -> PyResult<()>;
     fn set_item_py(&self, key: &Bound<PyAny>, value: &Bound<PyAny>, update: bool) -> PyResult<()>;
     fn del_item_py(&self, key: &Bound<PyAny>, update: bool) -> PyResult<()>;
@@ -45,36 +45,35 @@ impl<K, V> ValueDict<K, V> {
     }
 }
 
-impl<K, V> PyDict for ValueDict<K, V>
+impl<K, V> PyDictTrait for ValueDict<K, V>
 where
-    K: CollectionItem + ToPyObject + FromPyValue + Eq + Hash,
-    V: CollectionItem + ToPyObject + FromPyValue,
+    K: CollectionItem + ToPython + for<'py> FromPyObject<'py> + Eq + Hash,
+    V: CollectionItem + ToPython + for<'py> FromPyObject<'py>,
 {
-    fn get_py(&self, py: Python) -> PyObject {
+    fn get_py<'py>(&self, py: Python<'py>) -> Bound<'py, PyDict> {
         let dict = self.dict.read().unwrap();
 
-        let py_dict = pyo3::types::PyDict::new_bound(py);
+        let py_dict = pyo3::types::PyDict::new(py);
         for (key, value) in dict.iter() {
-            let key = key.to_object(py);
-            let value = value.to_object(py);
+            let key = key.to_python(py);
+            let value = value.to_python(py);
             py_dict.set_item(key, value).unwrap();
         }
-
-        py_dict.into()
+        py_dict
     }
 
-    fn get_item_py(&self, key: &Bound<PyAny>) -> PyResult<PyObject> {
-        let dict_key = K::from_python(key)?;
+    fn get_item_py<'py>(&self, key: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let dict_key = key.extract()?;
         let dict = self.dict.read().unwrap();
 
         match dict.get(&dict_key) {
-            Some(value) => Ok(value.to_object(key.py())),
+            Some(value) => Ok(value.to_python(key.py())),
             None => Err(PyKeyError::new_err("Key not found.")),
         }
     }
 
     fn del_item_py(&self, key: &Bound<PyAny>, update: bool) -> PyResult<()> {
-        let dict_key = K::from_python(key)?;
+        let dict_key: K = key.extract()?;
 
         let mut d = self.dict.write().unwrap();
 
@@ -89,8 +88,8 @@ where
     }
 
     fn set_item_py(&self, key: &Bound<PyAny>, value: &Bound<PyAny>, update: bool) -> PyResult<()> {
-        let dict_key = K::from_python(key)?;
-        let dict_value = V::from_python(value)?;
+        let dict_key: K = key.extract()?;
+        let dict_value: V = value.extract()?;
 
         let mut d = self.dict.write().unwrap();
 
@@ -109,8 +108,8 @@ where
         let mut new_dict = HashMap::new();
 
         for (key, value) in dict {
-            let key = K::from_python(&key)?;
-            let value = V::from_python(&value)?;
+            let key = key.extract()?;
+            let value = value.extract()?;
             new_dict.insert(key, value);
         }
 

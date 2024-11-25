@@ -1,15 +1,17 @@
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools", "numpy"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "egui-pysync"
 description = "A Python library for egui-pysync project."
-authors = [{ name = "Vojtěch Homola", email = "vojhom@outlook.cz" }]
+authors = [{ name = "Vojtech Homola", email = "vojhom@outlook.cz" }]
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 dynamic = ["version"]
 readme = "README.md"
+
+dependencies = ["numpy"]
 
 [tool.setuptools]
 packages = ["egui_pysync"]

@@ -2,54 +2,58 @@ use std::marker::PhantomData;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
 
-use egui_pytransport::transport::WriteMessage;
-use egui_pytransport::values::{ReadValue, ValueMessage, WriteValue};
-use egui_pytransport::EnumInt;
+use egui_pysync::transport::WriteMessage;
+use egui_pysync::values::{ReadValue, ValueMessage, WriteValue};
+use egui_pysync::EnumInt;
 
 pub(crate) trait ValueUpdate: Send + Sync {
     fn update_value(&self, head: &[u8], data: Option<Vec<u8>>) -> Result<(), String>;
 }
 
-pub struct Diff<T> {
+pub struct Diff<'a, T> {
     pub v: T,
     original: T,
+    value: &'a Value<T>,
 }
 
-impl<T: WriteValue + Clone + PartialEq> Diff<T> {
-    pub fn new(value: &Value<T>) -> Self {
+impl<'a, T: WriteValue + Clone + PartialEq> Diff<'a, T> {
+    pub fn new(value: &'a Value<T>) -> Self {
         let v = value.get();
         Self {
             v: v.clone(),
             original: v,
+            value,
         }
     }
 
     #[inline]
-    pub fn set(self, v: &Value<T>, signal: bool) {
+    pub fn set(self, signal: bool) {
         if self.v != self.original {
-            v.set(self.v, signal);
+            self.value.set(self.v, signal);
         }
     }
 }
 
-pub struct DiffEnum<T> {
+pub struct DiffEnum<'a, T> {
     pub v: T,
     original: T,
+    value: &'a ValueEnum<T>,
 }
 
-impl<T: EnumInt + Clone + PartialEq> DiffEnum<T> {
-    pub fn new(value: &ValueEnum<T>) -> Self {
+impl<'a, T: EnumInt + Clone + PartialEq> DiffEnum<'a, T> {
+    pub fn new(value: &'a ValueEnum<T>) -> Self {
         let v = value.get();
         Self {
             v: v.clone(),
             original: v,
+            value,
         }
     }
 
     #[inline]
-    pub fn set(self, v: &ValueEnum<T>, signal: bool) {
+    pub fn set(self, signal: bool) {
         if self.v != self.original {
-            v.set(self.v, signal);
+            self.value.set(self.v, signal);
         }
     }
 }

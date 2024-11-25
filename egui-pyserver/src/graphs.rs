@@ -1,3 +1,4 @@
+use std::ptr::copy_nonoverlapping;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, RwLock};
@@ -5,89 +6,294 @@ use std::sync::{Arc, RwLock};
 use pyo3::buffer::{Element, PyBuffer};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyBytes, PyTuple};
 
-use egui_pytransport::graphs::{GraphMessage, GraphsData, Precision};
-use egui_pytransport::transport::WriteMessage;
+use egui_pysync::graphs::{Graph, GraphElement, GraphMessage};
+use egui_pysync::nohash::NoHashMap;
+use egui_pysync::transport::WriteMessage;
 
-use crate::SyncTrait;
+use crate::{SyncTrait, ToPython};
 
 pub(crate) trait PyGraph: Send + Sync {
-    fn all_py(&self, object: &Bound<PyAny>, update: bool) -> PyResult<()>;
-    fn add_points_py(&self, object: &Bound<PyAny>, update: bool) -> PyResult<()>;
-    fn reset_py(&self, update: bool);
+    fn set_py(&self, idx: u16, object: &Bound<PyAny>, update: bool) -> PyResult<()>;
+    fn add_points_py(&self, idx: u16, object: &Bound<PyAny>, update: bool) -> PyResult<()>;
+    fn get_py<'py>(&self, py: Python<'py>, idx: u16) -> PyResult<Bound<'py, PyTuple>>;
+    fn len_py(&self, idx: u16) -> PyResult<usize>;
+    fn remove_py(&self, idx: u16, update: bool);
+    fn count_py(&self) -> u16;
+    fn is_linear_py(&self, idx: u16) -> PyResult<bool>;
+    fn clear_py(&self, update: bool);
 }
 
-pub trait GraphType: Element {
-    fn precision() -> Precision;
-}
-
-impl GraphType for f32 {
-    #[inline]
-    fn precision() -> Precision {
-        Precision::F32
-    }
-}
-
-impl GraphType for f64 {
-    #[inline]
-    fn precision() -> Precision {
-        Precision::F64
-    }
-}
-
-struct GraphInner {
-    y: Vec<u8>,
-    x: Vec<u8>,
-}
-
-pub struct ValueGraph<T> {
+pub struct ValueGraphs<T> {
     id: u32,
-    graph: RwLock<GraphInner>,
-    precision: Precision,
+    graphs: RwLock<NoHashMap<u16, Graph<T>>>,
 
     channel: Sender<WriteMessage>,
     connected: Arc<AtomicBool>,
-
-    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T: GraphType> ValueGraph<T> {
+impl<T> ValueGraphs<T> {
     pub(crate) fn new(
         id: u32,
         channel: Sender<WriteMessage>,
         connected: Arc<AtomicBool>,
     ) -> Arc<Self> {
-        let graph = RwLock::new(GraphInner {
-            y: Vec::new(),
-            x: Vec::new(),
-        });
+        let graphs = RwLock::new(NoHashMap::default());
 
         Arc::new(Self {
             id,
-            graph,
-            precision: T::precision(),
+            graphs,
             channel,
             connected,
-            _phantom: std::marker::PhantomData,
         })
     }
 }
 
-impl<T> PyGraph for ValueGraph<T>
+impl<T> PyGraph for ValueGraphs<T>
 where
-    T: Send + Sync + Clone + Element,
+    T: GraphElement + Element + for<'py> FromPyObject<'py> + ToPython,
 {
-    fn all_py(&self, object: &Bound<PyAny>, update: bool) -> PyResult<()> {
+    fn set_py(&self, idx: u16, object: &Bound<PyAny>, update: bool) -> PyResult<()> {
+        let buffer = PyBuffer::<T>::extract_bound(object)?;
+        let graph = buffer_to_graph(&buffer)?;
+
+        let mut w = self.graphs.write().unwrap();
+        if self.connected.load(Ordering::Relaxed) {
+            let graph_data = graph.to_graph_data(None);
+            let message = GraphMessage::Set(idx, graph_data);
+            self.channel
+                .send(WriteMessage::Graph(self.id, update, Box::new(message)))
+                .unwrap();
+        }
+        w.insert(idx, graph);
+        Ok(())
+    }
+
+    fn add_points_py(&self, idx: u16, object: &Bound<PyAny>, update: bool) -> PyResult<()> {
         let buffer = PyBuffer::<T>::extract_bound(object)?;
 
-        let shape = buffer.shape();
-        if shape.len() != 2 {
-            return Err(PyValueError::new_err("Graph data must have 2 dimensions."));
+        let mut w = self.graphs.write().unwrap();
+        let graph = w
+            .get_mut(&idx)
+            .ok_or_else(|| PyValueError::new_err("Graph not found"))?;
+        buffer_to_graph_add(&buffer, graph)?;
+
+        if self.connected.load(Ordering::Relaxed) {
+            let message = GraphMessage::AddPoints(idx, graph.to_graph_data(None));
+            self.channel
+                .send(WriteMessage::Graph(self.id, update, Box::new(message)))
+                .unwrap();
         }
 
+        Ok(())
+    }
+
+    fn get_py<'py>(&self, py: Python<'py>, idx: u16) -> PyResult<Bound<'py, PyTuple>> {
+        let w = self.graphs.read().unwrap();
+        let graph = w
+            .get(&idx)
+            .ok_or_else(|| PyValueError::new_err(format!("Graph with id {} not found", idx)))?;
+
+        match graph.x {
+            Some(ref x) => {
+                let size = (x.len() + graph.y.len()) * size_of::<T>();
+                let bytes = PyBytes::new_with(py, size, |buf| {
+                    let mut ptr = buf.as_mut_ptr() as *mut T;
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(x.as_ptr(), ptr, x.len());
+                        ptr = ptr.add(x.len());
+                        std::ptr::copy_nonoverlapping(graph.y.as_ptr(), ptr, graph.y.len());
+                    };
+                    Ok(())
+                })?;
+
+                let shape = (2usize, graph.y.len(), size_of::<T>());
+                (bytes, shape).into_pyobject(py)
+            }
+            None => {
+                let size = graph.y.len() * size_of::<T>();
+                let data =
+                    unsafe { std::slice::from_raw_parts(graph.y.as_ptr() as *const u8, size) };
+                let bytes = PyBytes::new(py, data);
+                (bytes, (graph.y.len(), size_of::<T>())).into_pyobject(py)
+            }
+        }
+    }
+
+    fn len_py(&self, idx: u16) -> PyResult<usize> {
+        let size = self
+            .graphs
+            .read()
+            .unwrap()
+            .get(&idx)
+            .ok_or(PyValueError::new_err(format!(
+                "Graph with id {} not found",
+                idx
+            )))?
+            .y
+            .len();
+
+        Ok(size)
+    }
+
+    fn remove_py(&self, idx: u16, update: bool) {
+        let mut w = self.graphs.write().unwrap();
+        if self.connected.load(Ordering::Relaxed) {
+            let message = GraphMessage::<T>::Remove(idx);
+            self.channel
+                .send(WriteMessage::Graph(self.id, update, Box::new(message)))
+                .unwrap();
+        }
+        w.remove(&idx);
+    }
+
+    fn count_py(&self) -> u16 {
+        self.graphs.read().unwrap().len() as u16
+    }
+
+    fn is_linear_py(&self, idx: u16) -> PyResult<bool> {
+        self.graphs.read().unwrap().get(&idx).map_or(
+            Err(PyValueError::new_err(format!(
+                "Graph with id {} not found",
+                idx
+            ))),
+            |graph| Ok(graph.x.is_none()),
+        )
+    }
+
+    fn clear_py(&self, update: bool) {
+        let mut w = self.graphs.write().unwrap();
+
+        if self.connected.load(Ordering::Relaxed) {
+            let message = GraphMessage::<T>::Reset;
+            self.channel
+                .send(WriteMessage::Graph(self.id, update, Box::new(message)))
+                .unwrap();
+        }
+        w.clear();
+    }
+}
+
+impl<T: GraphElement> SyncTrait for ValueGraphs<T> {
+    fn sync(&self) {
+        let w = self.graphs.read().unwrap();
+
+        self.channel
+            .send(WriteMessage::Graph(
+                self.id,
+                false,
+                Box::new(GraphMessage::<T>::Reset),
+            ))
+            .unwrap();
+
+        for (idx, graph) in w.iter() {
+            let message = GraphMessage::Set(*idx, graph.to_graph_data(None));
+            self.channel
+                .send(WriteMessage::Graph(self.id, false, Box::new(message)))
+                .unwrap();
+        }
+    }
+}
+
+fn buffer_to_graph_add<'py, T>(buffer: &PyBuffer<T>, graph: &mut Graph<T>) -> PyResult<()>
+where
+    T: GraphElement + Element + FromPyObject<'py>,
+{
+    let shape = buffer.shape();
+    let stride = buffer.strides().last().ok_or(PyValueError::new_err(
+        "Graph data must have at least 1 dimension.",
+    ))?;
+
+    if *stride != size_of::<T>() as isize {
+        return Err(PyValueError::new_err(
+            "Graph line data must have a contiguous memory layout.",
+        ));
+    }
+
+    if shape.len() == 1 {
+        if graph.x.is_some() {
+            return Err(PyValueError::new_err(
+                "Graph data to add must have the same x axis type.",
+            ));
+        }
+
+        let points = shape[0];
+
+        let ptr = buffer.get_ptr(&[0]) as *const T;
+        let original_len = graph.y.len();
+        graph.y.resize(original_len + points, T::zero());
+        unsafe { copy_nonoverlapping(ptr, graph.y[original_len..].as_mut_ptr(), points) };
+    } else if shape.len() == 2 {
+        if graph.x.is_none() {
+            return Err(PyValueError::new_err(
+                "Graph data to add must have the same x axis type.",
+            ));
+        }
+
+        let points = shape[1];
+
+        let original_len = graph.x.as_ref().unwrap().len();
+        graph
+            .x
+            .as_mut()
+            .unwrap()
+            .resize(points + original_len, T::zero());
+        let ptr = buffer.get_ptr(&[0, 0]) as *const T;
+        unsafe {
+            copy_nonoverlapping(
+                ptr,
+                graph.x.as_mut().unwrap()[original_len..].as_mut_ptr(),
+                points,
+            )
+        };
+
+        let ptr = buffer.get_ptr(&[1, 0]) as *const T;
+        let original_len = graph.y.len();
+        graph.y.resize(original_len + points, T::zero());
+        unsafe { copy_nonoverlapping(ptr, graph.y[original_len..].as_mut_ptr(), points) };
+    } else {
+        return Err(PyValueError::new_err(
+            "Graph data must have 1 or 2 dimensions.",
+        ));
+    }
+
+    Ok(())
+}
+
+fn buffer_to_graph<'py, T>(buffer: &PyBuffer<T>) -> PyResult<Graph<T>>
+where
+    T: GraphElement + Element + FromPyObject<'py>,
+{
+    let shape = buffer.shape();
+    let stride = buffer.strides().last().ok_or(PyValueError::new_err(
+        "Graph data must have at least 1 dimension.",
+    ))?;
+
+    if *stride != size_of::<T>() as isize {
+        return Err(PyValueError::new_err(
+            "Graph line data must have a contiguous memory layout.",
+        ));
+    }
+
+    if shape.len() == 1 {
+        if shape[0] < 2 {
+            return Err(PyValueError::new_err(
+                "Graph data must have at least 2 points.",
+            ));
+        }
+
+        let points = shape[0];
+
+        let ptr = buffer.get_ptr(&[0]) as *const T;
+        let mut y = vec![T::zero(); points];
+        unsafe { std::ptr::copy_nonoverlapping(ptr, y.as_mut_ptr(), points) };
+
+        Ok(Graph { y, x: None })
+    } else if shape.len() == 2 {
         if shape[0] != 2 {
             return Err(PyValueError::new_err(
-                "Graph data must have at 2 lines (x, y).",
+                "Graph data must have 2 lines (x, y).",
             ));
         }
         if shape[1] < 2 {
@@ -98,108 +304,18 @@ where
 
         let points = shape[1];
 
-        let line_size = points * size_of::<T>();
-        let mut x = vec![0u8; line_size];
-        let mut y = vec![0u8; line_size];
-        let ptr = buffer.get_ptr(&[0, 0]) as *const u8;
-        unsafe { std::ptr::copy_nonoverlapping(ptr, x.as_mut_ptr(), line_size) };
-        let ptr = buffer.get_ptr(&[1, 0]) as *const u8;
-        unsafe { std::ptr::copy_nonoverlapping(ptr, y.as_mut_ptr(), line_size) };
+        let mut x = vec![T::zero(); points];
+        let ptr = buffer.get_ptr(&[0, 0]) as *const T;
+        unsafe { std::ptr::copy_nonoverlapping(ptr, x.as_mut_ptr(), points) };
 
-        let mut w = self.graph.write().unwrap();
+        let mut y = vec![T::zero(); points];
+        let ptr = buffer.get_ptr(&[1, 0]) as *const T;
+        unsafe { std::ptr::copy_nonoverlapping(ptr, y.as_mut_ptr(), points) };
 
-        if self.connected.load(Ordering::Relaxed) {
-            let mut send_data = vec![0u8; line_size * 2];
-            send_data[..line_size].copy_from_slice(&x);
-            send_data[line_size..].copy_from_slice(&y);
-
-            let message = GraphMessage::All(GraphsData {
-                precision: self.precision,
-                points,
-                data: send_data,
-            });
-            self.channel
-                .send(WriteMessage::Graph(self.id, update, message))
-                .unwrap();
-        }
-
-        *w = GraphInner { y, x };
-
-        Ok(())
-    }
-
-    fn add_points_py(&self, object: &Bound<PyAny>, update: bool) -> PyResult<()> {
-        let buffer = PyBuffer::<T>::extract_bound(object)?;
-        let shape = buffer.shape();
-
-        if shape.len() != 2 {
-            return Err(PyValueError::new_err("Graph data must have 2 dimensions."));
-        }
-        let points = shape[1];
-        if points < 1 {
-            return Err(PyValueError::new_err(
-                "Added graph data must have at least 1 point.",
-            ));
-        }
-
-        let mut g = self.graph.write().unwrap();
-        let start = g.x.len();
-        let ptr = buffer.get_ptr(&[0, 0]) as *const u8;
-        let line = unsafe { std::slice::from_raw_parts(ptr, points * size_of::<T>()) };
-        g.x.extend_from_slice(line);
-        let ptr = buffer.get_ptr(&[1, 0]) as *const u8;
-        let line = unsafe { std::slice::from_raw_parts(ptr, points * size_of::<T>()) };
-        g.y.extend_from_slice(line);
-
-        if self.connected.load(Ordering::Relaxed) {
-            let mut data = vec![0u8; points * size_of::<T>() * 2];
-            data[..points * size_of::<T>()].copy_from_slice(&g.x[start..]);
-            data[points * size_of::<T>()..].copy_from_slice(&g.y[start..]);
-
-            let message = GraphMessage::AddPoints(GraphsData {
-                precision: self.precision,
-                points,
-                data,
-            });
-            self.channel
-                .send(WriteMessage::Graph(self.id, update, message))
-                .unwrap();
-        }
-
-        Ok(())
-    }
-
-    fn reset_py(&self, update: bool) {
-        let mut w = self.graph.write().unwrap();
-        w.x.clear();
-        w.y.clear();
-
-        if self.connected.load(Ordering::Relaxed) {
-            self.channel
-                .send(WriteMessage::Graph(self.id, update, GraphMessage::Reset))
-                .unwrap();
-        }
-    }
-}
-
-impl<T: Send + Sync> SyncTrait for ValueGraph<T> {
-    fn sync(&self) {
-        let w = self.graph.read().unwrap();
-        if w.x.is_empty() {
-            return;
-        }
-
-        let mut data = vec![0u8; w.x.len() + w.y.len()];
-        data[..w.x.len()].copy_from_slice(&w.x);
-        data[w.x.len()..].copy_from_slice(&w.y);
-
-        let message = GraphMessage::All(GraphsData {
-            precision: self.precision,
-            points: w.x.len() / size_of::<T>(),
-            data,
-        });
-        self.channel
-            .send(WriteMessage::Graph(self.id, false, message))
-            .unwrap();
+        Ok(Graph { y, x: Some(x) })
+    } else {
+        return Err(PyValueError::new_err(
+            "Graph data must have 1 or 2 dimensions.",
+        ));
     }
 }

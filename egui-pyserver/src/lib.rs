@@ -8,7 +8,7 @@ pub mod dict;
 pub mod graphs;
 pub mod image;
 pub mod list;
-pub mod py_convert;
+pub mod python_convert;
 pub mod states_creator;
 pub mod values;
 
@@ -34,8 +34,9 @@ pub fn init_module(
 }
 
 pub use dict::ValueDict;
-pub use graphs::ValueGraph;
-pub use image::ImageValue;
+pub use graphs::ValueGraphs;
+pub use image::ValueImage;
 pub use list::ValueList;
+pub use python_convert::ToPython;
 pub use states_creator::ValuesCreator;
 pub use values::{Signal, Value, ValueEnum, ValueStatic};

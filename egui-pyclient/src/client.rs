@@ -3,10 +3,10 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 
 use egui::Context;
-use egui_pytransport::transport::{read_message, write_message, ReadMessage, WriteMessage};
-use egui_pytransport::{commands::CommandMessage, transport::HEAD_SIZE};
+use egui_pysync::transport::{read_message, write_message, ReadMessage, WriteMessage};
+use egui_pysync::{commands::CommandMessage, transport::HEAD_SIZE};
 
-use crate::client_state::UIState;
+use crate::client_state::{ConnectionState, UIState};
 use crate::states_creator::{ValuesCreator, ValuesList};
 
 fn handle_message(
@@ -27,7 +27,7 @@ fn handle_message(
     let update = match message {
         ReadMessage::Value(id, updata, head, data) => match vals.values.get(&id) {
             Some(value) => {
-                value.update_value(&head, data)?;
+                value.update_value(head, data)?;
                 updata
             }
             None => return Err(format!("Value with id {} not found", id)),
@@ -35,7 +35,7 @@ fn handle_message(
 
         ReadMessage::Static(id, updata, head, data) => match vals.static_values.get(&id) {
             Some(value) => {
-                value.update_value(&head, data)?;
+                value.update_value(head, data)?;
                 updata
             }
             None => return Err(format!("Static with id {} not found", id)),
@@ -49,17 +49,9 @@ fn handle_message(
             None => return Err(format!("Image with id {} not found", id)),
         },
 
-        ReadMessage::Histogram(id, updata, hist) => match vals.images.get(&id) {
-            Some(value) => {
-                value.update_histogram(hist)?;
-                updata
-            }
-            None => return Err(format!("Image with id {} not found", id)),
-        },
-
         ReadMessage::Dict(id, updata, head, data) => match vals.dicts.get(&id) {
             Some(value) => {
-                value.update_dict(&head, data)?;
+                value.update_dict(head, data)?;
                 updata
             }
             None => return Err(format!("Dict with id {} not found", id)),
@@ -67,15 +59,15 @@ fn handle_message(
 
         ReadMessage::List(id, updata, head, data) => match vals.lists.get(&id) {
             Some(value) => {
-                value.update_list(&head, data)?;
+                value.update_list(head, data)?;
                 updata
             }
             None => return Err(format!("List with id {} not found", id)),
         },
 
-        ReadMessage::Graph(id, updata, graph) => match vals.graphs.get(&id) {
+        ReadMessage::Graph(id, updata, head, data) => match vals.graphs.get(&id) {
             Some(value) => {
-                value.update_graph(graph)?;
+                value.update_graph(head, data)?;
                 updata
             }
             None => return Err(format!("Graph with id {} not found", id)),
@@ -107,8 +99,8 @@ fn start_gui_client(
     let client_thread = thread::Builder::new().name("Client".to_string());
     let _ = client_thread.spawn(move || loop {
         // wait for the connection signal
-        ui_state.connect_signal().clear();
-        ui_state.connect_signal().wait_lock();
+        ui_state.wait_connection();
+        ui_state.set_state(ConnectionState::NotConnected);
 
         // try to connect to the server
         let res = TcpStream::connect(addr);
@@ -204,12 +196,16 @@ fn start_gui_client(
             })
             .unwrap();
 
+        ui_state.set_state(ConnectionState::Connected);
+
         // wait for the read thread to finish
         recv_tread.join().unwrap();
 
         // terminate the send thread
         channel.send(WriteMessage::Terminate).unwrap();
         rx = send_thread.join().unwrap();
+
+        ui_state.set_state(ConnectionState::Disconnected);
     });
 }
 
@@ -244,7 +240,7 @@ impl ClientBuilder {
 
         let addr = SocketAddrV4::new(addr.into(), port);
         let (values, version) = creator.get_values();
-        let ui_state = UIState::new(context);
+        let ui_state = UIState::new(context, channel.clone());
         start_gui_client(
             addr,
             values,
