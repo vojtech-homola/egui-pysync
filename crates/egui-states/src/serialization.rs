@@ -8,6 +8,11 @@ use crate::image_transport::ImageHeader;
 // TODO: make these constants configurable
 pub(crate) const VALUE_MAX_SIZE: usize = 1024 * 1024; // 1 MB
 pub(crate) const MSG_SIZE_THRESHOLD: usize = 1024 * 1024 * 10; // 10 MB
+#[cfg(any(
+    all(feature = "client", not(target_arch = "wasm32")),
+    feature = "server",
+    feature = "python"
+))]
 pub(crate) const WEBSOCKET_MAX_SIZE: usize = MSG_SIZE_THRESHOLD + MSG_SIZE_THRESHOLD / 5; // 12 MB
 pub(crate) const MAX_MSG_COUNT: usize = 10;
 
