@@ -24,7 +24,7 @@
     "module": "IPython",
     "args": [
       "-i",
-      "example/python/example.py",
+      "example/python/run.py",
       "--matplotlib"
     ]
   }
