@@ -350,8 +350,10 @@ struct ImageMultiInner {
 
 /// A server-controlled sparse collection of RGBA textures indexed by `u32` keys.
 ///
-/// Call [`Self::initialize`] once with an egui context before connecting. Complete
-/// images received for new keys create their textures automatically.
+/// Call [`Self::initialize`] once with an egui context before expecting server
+/// images to become visible. Complete images received for absent keys create
+/// their textures automatically. Images received before initialization are
+/// validated and acknowledged but cannot be applied to a texture.
 pub struct ImageMulti {
     name: Arc<String>,
     id: u64,
@@ -374,9 +376,12 @@ impl ImageMulti {
         }
     }
 
-    /// Stores the egui context used to create textures for newly received keys.
+    /// Stores the egui context used to create textures for newly populated keys.
     ///
-    /// Subsequent calls are ignored after the collection has been initialized.
+    /// Call this from the UI before connecting when the server may send images
+    /// immediately. Subsequent calls are ignored after initialization, even if
+    /// they use a different context. Newly created textures use nearest-neighbor
+    /// filtering and clamp sampling at their edges.
     pub fn initialize(&self, ctx: &egui::Context) {
         let mut inner = self.inner.write();
         if inner.context.is_none() {
@@ -384,7 +389,8 @@ impl ImageMulti {
         }
     }
 
-    /// Returns the texture identifier and `[width, height]` for `index`.
+    /// Returns the texture identifier and `[width, height]` for `index`, if
+    /// populated.
     pub fn get(&self, index: u32) -> Option<(egui::TextureId, [usize; 2])> {
         self.inner
             .read()
@@ -393,17 +399,17 @@ impl ImageMulti {
             .map(|(texture, size)| (texture.id(), *size))
     }
 
-    /// Returns the texture identifier for `index`.
+    /// Returns the texture identifier for `index`, if populated.
     pub fn get_id(&self, index: u32) -> Option<egui::TextureId> {
         self.get(index).map(|(id, _)| id)
     }
 
-    /// Returns the `[width, height]` texture size for `index`.
+    /// Returns the `[width, height]` texture size for `index`, if populated.
     pub fn get_size(&self, index: u32) -> Option<[usize; 2]> {
         self.get(index).map(|(_, size)| size)
     }
 
-    /// Returns the number of populated image keys.
+    /// Returns the number of populated keys, not the highest index plus one.
     pub fn len(&self) -> usize {
         self.inner.read().images.len()
     }
@@ -418,7 +424,7 @@ impl ImageMulti {
         self.inner.read().images.contains_key(&index)
     }
 
-    /// Returns populated indices in ascending order.
+    /// Returns a snapshot of the populated indices in ascending order.
     pub fn indices(&self) -> Vec<u32> {
         let mut indices = self.inner.read().images.keys().copied().collect::<Vec<_>>();
         indices.sort_unstable();

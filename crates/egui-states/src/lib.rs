@@ -36,7 +36,8 @@
 //!   server-to-client transfers.
 //! - [`VecState`] and [`MapState`] are server-controlled collections.
 //! - [`Data`] and [`DataMulti`] efficiently transfer numeric buffers.
-//! - [`Image`] updates an egui texture with complete images or rectangles.
+//! - [`Image`] updates one egui texture, while [`ImageMulti`] manages a sparse
+//!   collection of textures indexed by `u32` keys.
 //!
 //! # Cargo features
 //!
