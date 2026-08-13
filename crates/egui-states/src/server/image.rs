@@ -1,3 +1,5 @@
+//! Server-controlled image storage and image-format helpers.
+
 use std::sync::Arc;
 
 use crate::image_transport::ImageType;
@@ -33,6 +35,7 @@ impl ImageColor {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Channel layout of image bytes passed to [`Image::set`] or [`Image::update`].
+/// The client expands every format to its four-channel egui texture storage.
 pub enum ImageFormat {
     /// Three bytes per pixel: RGB.
     Color,
@@ -86,6 +89,11 @@ impl Image {
     ///
     /// `size` is `[height, width]`; `data` must contain exactly the number of
     /// bytes implied by `size` and `format`. `update` requests a client repaint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the dimensions overflow, the data length does not
+    /// match `size` and `format`, or the update cannot be queued.
     pub fn set(
         &self,
         data: &[u8],
@@ -111,6 +119,11 @@ impl Image {
     /// `shape` is `[height, width]`. When a client is connected, this sends only
     /// a compact header; the server still retains the complete RGBA image for
     /// subsequent reads, updates, and connection synchronization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for zero or overflowing dimensions, or when the update
+    /// cannot be queued.
     pub fn set_all(&self, shape: [usize; 2], color: ImageColor, update: bool) -> Result<()> {
         self.inner
             .set_all_image(shape, color.rgba(), update)
@@ -121,6 +134,11 @@ impl Image {
     ///
     /// `origin` and `size` are `[y, x]` and `[height, width]`. With `force`, a
     /// pending update for the same region may be replaced by this one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rectangle lies outside the current image, its
+    /// dimensions overflow, its data length is invalid, or it cannot be queued.
     pub fn update(
         &self,
         data: &[u8],

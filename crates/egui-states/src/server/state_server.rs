@@ -1,3 +1,5 @@
+//! Native server lifecycle and callback-worker management.
+
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{
@@ -39,7 +41,8 @@ use super::{Result, ServerError, ServerOptions};
 #[derive(Clone)]
 /// Native WebSocket server that owns synchronized states and callback workers.
 ///
-/// Register every state, call [`Self::finalize`], and then call [`Self::start`].
+/// The lifecycle is: register every state, call [`Self::finalize`], call
+/// [`Self::start`], and finally call [`Self::stop`] or drop the last clone.
 /// Generated server bindings perform registration and finalization for you.
 pub struct StateServer {
     inner: Arc<ServerInner>,
@@ -147,13 +150,23 @@ impl StateServer {
 
     /// Freezes state registration and prepares the handshake description.
     ///
-    /// Call this after constructing every state and before [`Self::start`].
+    /// Call this after constructing every state and before [`Self::start`]. A
+    /// later attempt to register another state returns an error.
     pub fn finalize(&self) -> Result<()> {
         self.inner.server.write().finalize();
         Ok(())
     }
 
     /// Starts listening and launches callback workers.
+    ///
+    /// The native server owns a dedicated thread and Tokio runtime; call this
+    /// from synchronous application code rather than from code that requires
+    /// server shutdown to run inside an existing async runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server was not finalized, the socket cannot be
+    /// bound or configured, or its runtime/thread cannot be started.
     pub fn start(&self) -> Result<()> {
         self.inner
             .server
@@ -187,7 +200,7 @@ impl StateServer {
     /// Requests a client repaint.
     ///
     /// `None` requests an immediate repaint; `Some(seconds)` schedules it after
-    /// the supplied delay.
+    /// the supplied delay. The request is a no-op when no client is connected.
     pub fn update(&self, duration: Option<f32>) -> Result<()> {
         self.inner
             .server
@@ -202,11 +215,15 @@ impl StateServer {
     }
 
     /// Registers a callback receiving the remote address after a client connects.
+    ///
+    /// Retain the returned handle; dropping it unregisters the callback.
     pub fn on_connect(&self, callback: impl Fn(String) + Send + Sync + 'static) -> CallbackHandle {
         self.add_typed_callback(ON_CONNECT_ID, callback)
     }
 
     /// Registers a callback invoked when the client disconnects.
+    ///
+    /// Retain the returned handle; dropping it unregisters the callback.
     pub fn on_disconnect(&self, callback: impl Fn() + Send + Sync + 'static) -> CallbackHandle {
         self.add_raw_callback(ON_DISCONNECT_ID, move |_, _| {
             callback();
@@ -215,6 +232,8 @@ impl StateServer {
     }
 
     /// Registers a callback for diagnostic text messages sent by the client.
+    ///
+    /// Retain the returned handle; dropping it unregisters the callback.
     pub fn on_client_message(
         &self,
         callback: impl Fn(String) + Send + Sync + 'static,

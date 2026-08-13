@@ -1,3 +1,5 @@
+//! Atomic and lock-backed storage for copyable client state values.
+
 use parking_lot::{Mutex, RwLock};
 use std::sync::atomic::{
     AtomicBool, AtomicI8, AtomicI16, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32,
@@ -53,7 +55,10 @@ pub unsafe trait AtomicLock<T: Copy>: AtomicLockStatic<T> {
     fn update<F: FnOnce()>(&self, value: T, before_store: F);
 }
 
-/// Adds serialized update ordering around an [`AtomicLockStatic`].
+/// Adds mutex-serialized update ordering around an [`AtomicLockStatic`].
+///
+/// Loads and stores may use the inner atomic directly, but [`AtomicLock::update`]
+/// is not lock-free because it holds a mutex across notification and storage.
 pub struct UpdateLock<L>(Mutex<()>, L);
 
 unsafe impl<T: Copy, L: AtomicLockStatic<T>> AtomicLockStatic<T> for UpdateLock<L> {
@@ -83,6 +88,9 @@ unsafe impl<T: Copy, L: AtomicLockStatic<T>> AtomicLock<T> for UpdateLock<L> {
 }
 
 /// `RwLock`-based storage for targets without a suitable native atomic.
+///
+/// For example, 64-bit values use this fallback when the target does not
+/// advertise 64-bit atomic support.
 pub struct FallbackLock<T: Copy>(RwLock<T>);
 
 unsafe impl<T: Copy + Send + Sync> AtomicLockStatic<T> for FallbackLock<T> {
@@ -111,10 +119,10 @@ unsafe impl<T: Copy + Send + Sync> AtomicLock<T> for FallbackLock<T> {
     }
 }
 
-// ----------------------------------------------------
-// implemntation basic --------------------------------
-// 64
+// Built-in 64-bit atomic storage.
+/// Native atomic storage used by built-in `u64`, `f64`, and two-`f32` values.
 pub struct U64Lock(pub AtomicU64);
+/// Native atomic storage used by the built-in `i64` value.
 pub struct I64Lock(pub AtomicI64);
 
 macro_rules! ImplAtomic64 {
@@ -154,13 +162,20 @@ macro_rules! ImplAtomic64 {
 ImplAtomic64!(u64, U64Lock, AtomicU64);
 ImplAtomic64!(i64, I64Lock, AtomicI64);
 
-// basics
+// Built-in atomic storage for values up to 32 bits.
+/// Native atomic storage used by built-in `u32` and `f32` values.
 pub struct U32Lock(AtomicU32);
+/// Native atomic storage used by the built-in `i32` value.
 pub struct I32Lock(AtomicI32);
+/// Native atomic storage used by the built-in `u16` value.
 pub struct U16Lock(AtomicU16);
+/// Native atomic storage used by the built-in `i16` value.
 pub struct I16Lock(AtomicI16);
+/// Native atomic storage used by the built-in `u8` value.
 pub struct U8Lock(AtomicU8);
+/// Native atomic storage used by the built-in `i8` value.
 pub struct I8Lock(AtomicI8);
+/// Native atomic storage used by the built-in `bool` value.
 pub struct BoolLock(AtomicBool);
 
 macro_rules! ImplAtomic {
@@ -255,7 +270,7 @@ unsafe impl AtomicStatic for f32 {
     type Lock = U32Lock;
 }
 
-// F32F32
+// Pack two f32 bit patterns into one u64 so both components change atomically.
 unsafe impl AtomicLockStatic<(f32, f32)> for U64Lock {
     fn new(value: (f32, f32)) -> Self {
         let combined = ((value.0.to_bits() as u64) << 32) | (value.1.to_bits() as u64);

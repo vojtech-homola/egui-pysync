@@ -1,3 +1,5 @@
+//! Server handles for contiguous and one-shot numeric buffers.
+
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -11,6 +13,9 @@ use super::state_server::StateServer;
 use super::{Result, ServerError};
 
 /// A numeric element that can be transported by a [`Data`] state.
+///
+/// Built-in implementations are provided for `u8` through `u64`, `i8` through
+/// `i64`, `f32`, and `f64`. Bytes are transported in native-endian form.
 ///
 /// # Safety
 ///
@@ -124,6 +129,11 @@ where
     }
 
     /// Replaces elements starting at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the replaced range exceeds the current buffer or
+    /// the update cannot be serialized or queued.
     pub fn replace(&self, data: &[T], index: usize, update: bool) -> Result<()> {
         self.inner
             .replace(data_holder(data), index, update)
@@ -131,6 +141,11 @@ where
     }
 
     /// Removes `count` elements starting at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the removed range exceeds the current buffer or
+    /// the update cannot be queued.
     pub fn remove(&self, index: usize, count: usize, update: bool) -> Result<()> {
         self.inner
             .remove(index, count, update)

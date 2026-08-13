@@ -1,3 +1,5 @@
+//! Client handles for scalar values, signals, and one-shot values.
+
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -37,16 +39,20 @@ impl<'a, T: Serialize + Clone + PartialEq> Diff<'a, T> {
         }
     }
 
-    #[inline]
     /// Sends the edited value if it differs from the captured value.
+    ///
+    /// The comparison uses `T`'s [`PartialEq`] implementation.
+    #[inline]
     pub fn set(self) {
         if self.v != self.original {
             self.value.set(self.v);
         }
     }
 
-    #[inline]
     /// Sends and signals the edited value if it differs from the captured value.
+    ///
+    /// The comparison uses `T`'s [`PartialEq`] implementation.
+    #[inline]
     pub fn set_signal(self) {
         if self.v != self.original {
             self.value.set_signal(self.v);
@@ -73,16 +79,20 @@ impl<'a, T: Serialize + Clone + PartialEq + Atomic> DiffAtomic<'a, T> {
         }
     }
 
-    #[inline]
     /// Sends the edited value if it differs from the captured value.
+    ///
+    /// The comparison uses `T`'s [`PartialEq`] implementation.
+    #[inline]
     pub fn set(self) {
         if self.v != self.original {
             self.value.set(self.v);
         }
     }
 
-    #[inline]
     /// Sends and signals the edited value if it differs from the captured value.
+    ///
+    /// The comparison uses `T`'s [`PartialEq`] implementation.
+    #[inline]
     pub fn set_signal(self) {
         if self.v != self.original {
             self.value.set_signal(self.v);
@@ -98,13 +108,13 @@ pub(crate) trait UpdateValueTake: Sync + Send {
     fn update_take(&self, type_id: u32, data: &[u8], blocking: bool) -> Result<(), String>;
 }
 
-/// Type-level selection of how incoming server callbacks are buffered.
+/// Selects how server callbacks buffer signaled client changes.
 pub trait GetQueueType: Sync + Send + 'static {
     /// Returns whether every pending change should be queued.
     fn is_queue() -> bool;
 }
 
-/// Marker selecting single mode, where pending changes may coalesce.
+/// Coalescing mode: callbacks receive only the latest pending signaled change.
 pub struct NoQueue;
 
 impl GetQueueType for NoQueue {
@@ -114,7 +124,7 @@ impl GetQueueType for NoQueue {
     }
 }
 
-/// Marker selecting queue mode, where every pending change is processed.
+/// Queue mode: callbacks receive every signaled change in arrival order.
 pub struct Queue;
 
 impl GetQueueType for Queue {
@@ -130,6 +140,11 @@ impl GetQueueType for Queue {
 /// Client writes update the local copy immediately and are sent to the server.
 /// `Q` controls how server-side callbacks process changes produced by
 /// [`Self::set_signal`] or [`Self::write_signal`].
+///
+/// An oversized [`Self::set`] is rejected before changing the local copy. An
+/// oversized in-place [`Self::write`] keeps the local edit but cannot send it,
+/// so the peers remain out of sync until a later successful write or server
+/// update.
 pub struct Value<T, Q: GetQueueType = NoQueue> {
     name: String,
     id: u64,
@@ -225,11 +240,17 @@ where
     }
 
     /// Replaces the client value and sends it to the server without signaling.
+    ///
+    /// If serialization exceeds the protocol value limit, the operation is
+    /// reported and the stored client value is left unchanged.
     pub fn set(&self, value: T) {
         self.set_inner(value, false);
     }
 
     /// Replaces the client value and asks the server to emit its callbacks.
+    ///
+    /// If serialization exceeds the protocol value limit, the operation is
+    /// reported and the stored client value is left unchanged.
     pub fn set_signal(&self, value: T) {
         self.set_inner(value, true);
     }
@@ -269,6 +290,10 @@ impl<T, Q: GetQueueType> Clone for Value<T, Q> {
 }
 
 /// Atomic variant of [`Value`] for small copyable values.
+///
+/// Built-in implementations cover integers, `bool`, `f32`, `f64`, `(f32,
+/// f32)`, and `[f32; 2]`. Custom [`Atomic`] implementations must preserve the
+/// synchronization and size guarantees documented by that unsafe trait.
 pub struct ValueAtomic<T: Atomic, Q: GetQueueType = NoQueue> {
     name: String,
     id: u64,
@@ -485,7 +510,10 @@ impl<T: Serialize + Clone, Q: GetQueueType> Signal<T, Q> {
         }
     }
 
-    /// Emits `value` to the server.
+    /// Emits `value` to the server without retaining it on the client.
+    ///
+    /// The `Into<T>` parameter accepts values that can be converted to the
+    /// signal's payload type, such as `&str` for a `Signal<String>`.
     pub fn set(&self, value: impl Into<T>) {
         let message = to_message(&value.into());
 
@@ -536,6 +564,9 @@ impl<T> ValueTake<T> {
     }
 
     /// Removes and returns the pending value, if one has arrived.
+    ///
+    /// Each value can be taken once. Taking a blocking value also acknowledges
+    /// it, allowing the server to send the next pending value.
     pub fn take(&self) -> Option<T> {
         let value = self.value.write().take();
         if let Some((val, blocking)) = value {

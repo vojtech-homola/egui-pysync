@@ -1,3 +1,5 @@
+//! State-handle factories and stable state-layout hashing.
+
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -35,7 +37,9 @@ pub(crate) fn hash_id(hasher: &mut StableHasher, id: u64) {
 ///
 /// Applications normally receive an implementation through a derived
 /// [`State`](derive@crate::State) implementation instead of implementing this
-/// trait themselves.
+/// trait themselves. Every `name` becomes one segment below the current state
+/// path (for example, `counter` below the root becomes `root.counter`) and must
+/// be unique among siblings.
 pub trait StatesCreator {
     /// Creates a nested state group under `name`.
     fn substate<S: State>(&mut self, name: &str) -> S;
@@ -186,6 +190,9 @@ impl ValuesList {
     }
 }
 
+// Stable tags mixed into the layout hash to distinguish state kinds. These
+// values are part of the client/server compatibility contract; do not reorder
+// or reuse them.
 pub(crate) const VALUE_HASH_ID: u8 = 0;
 pub(crate) const VALUE_TAKE_HASH_ID: u8 = 1;
 pub(crate) const ATOMIC_HASH_ID: u8 = 2;
@@ -199,6 +206,7 @@ pub(crate) const DATA_MULTI_HASH_ID: u8 = 9;
 pub(crate) const DATA_TAKE_HASH_ID: u8 = 10;
 pub(crate) const DATA_MULTI_TAKE_HASH_ID: u8 = 11;
 
+/// Runtime state factory used internally by [`crate::ClientBuilder`].
 pub struct StatesCreatorClient {
     val: ValuesList,
     sender: MessageSender,
@@ -216,6 +224,7 @@ impl StatesCreatorClient {
         }
     }
 
+    /// Returns the stable layout hash accumulated while constructing states.
     pub fn get_version_hash(&self) -> u64 {
         self.version_hasher.finish()
     }

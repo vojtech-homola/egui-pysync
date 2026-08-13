@@ -16,8 +16,23 @@ _CLIENT_MESSAGE_ID = 3
 
 
 def _initialize(
-    obj, parent: str, server: StateServerCore, signals_manager: SignalsManager, types: list[PyObjectType]
+    obj: object,
+    parent: str,
+    server: StateServerCore,
+    signals_manager: SignalsManager,
+    types: list[PyObjectType],
 ) -> None:
+    """Attach generated state handles recursively to their native server ids.
+
+    Args:
+        obj (object): Generated root state or nested state group to initialize.
+        parent (str): Fully qualified path of the parent state.
+        server (StateServerCore): Native server that owns the states.
+        signals_manager (SignalsManager):
+            Dispatches callbacks for signal states.
+        types (list[PyObjectType]): Protocol types referenced by generated
+            states.
+    """
     for name, o in obj.__dict__.items():
         full_name = f"{parent}.{name}"
         if isinstance(o, _StaticBase):
@@ -30,7 +45,7 @@ def _initialize(
 
 
 class StatesBase(ABC):
-    """The root state class for the UI states."""
+    """Generated root state tree owned by a Python server."""
 
     def __init__(self, server: "StateServerBase") -> None:
         self._server = server
@@ -39,15 +54,16 @@ class StatesBase(ABC):
         """Request the UI to update.
 
         Args:
-            dt: Repaint delay in seconds, or ``None`` for an immediate repaint.
+            dt (float | None, optional): Repaint delay in seconds, or ``None``
+                for an immediate repaint.
         """
         self._server.update(dt)
 
     def get_server(self) -> "StateServerBase":
-        """Get the state server.
+        """Return the state server that owns this tree.
 
         Returns:
-            StateServer: The state server.
+            StateServerBase: The owning state server.
         """
         return self._server
 
@@ -73,13 +89,18 @@ class StateServerBase[T: StatesBase]:
         """Initialize the state server.
 
         Args:
-            state_class: Generated root-state class.
-            port: TCP port on which the WebSocket server listens.
-            signals_workers: Number of worker threads that invoke callbacks.
-            error_handler: Handler for exceptions raised while processing callbacks.
-            ip_addr: IPv4 address to bind, or ``None`` to bind all interfaces.
-            version: Optional application version required from the client.
-            token: Optional authentication token required from the client.
+            state_class (type[T]): Generated root-state class.
+            port (int): TCP port on which the WebSocket server listens.
+            signals_workers (int, optional): Number of worker threads that
+                invoke callbacks.
+            error_handler (Callable[[Exception], None] | None, optional):
+                Handler for exceptions raised while processing callbacks.
+            ip_addr (tuple[int, int, int, int] | None, optional): IPv4 address
+                to bind, or ``None`` to bind all interfaces.
+            version (int | None, optional): Application version required from
+                the client.
+            token (str | None, optional): Authentication token required from
+                the client.
         """
         self._server = StateServerCore(port, ip_addr, version, token)
         self._signals_manager = SignalsManager(self._server, signals_workers, error_handler)
@@ -98,14 +119,19 @@ class StateServerBase[T: StatesBase]:
 
     @property
     def states(self) -> T:
-        """The root state object."""
+        """The generated root state object.
+
+        Returns:
+            T: The generated root state object.
+        """
         return self._states
 
     def update(self, duration: float | None = None) -> None:
-        """Update the UI.
+        """Request an egui repaint on the connected client.
 
         Args:
-            duration: Repaint delay in seconds, or ``None`` for an immediate repaint.
+            duration (float | None, optional): Repaint delay in seconds, or
+                ``None`` for an immediate repaint.
         """
         self._server.update(duration)
 
@@ -123,29 +149,41 @@ class StateServerBase[T: StatesBase]:
         self._server.disconnect_client()
 
     def is_running(self) -> bool:
-        """Return whether the server is listening."""
+        """Return whether the server is listening.
+
+        Returns:
+            bool: Whether the server is listening.
+        """
         return self._server.is_running()
 
     def is_connected(self) -> bool:
-        """Return whether a client is connected."""
+        """Return whether a client is connected.
+
+        Returns:
+            bool: Whether a client is connected.
+        """
         return self._server.is_connected()
 
     def set_error_handler(self, error_handler: Callable[[Exception], None] | None) -> None:
-        """Set the error handler.
+        """Set the handler for callback and signal-worker errors.
 
-        Function that will be called when an error occurs in the signals threads. By default, it prints the traceback.
-        Be careful, if error is not handled, the thread will be stopped.
+        The default handler prints a traceback. Exceptions raised by the
+        handler while processing a callback error are ignored; the handler
+        should return normally so errors from the native signal loop do not
+        terminate that worker.
 
         Args:
-            error_handler: Handler to install, or ``None`` to restore the default.
+            error_handler (Callable[[Exception], None] | None): Handler to
+                install, or ``None`` to restore the default.
         """
         self._signals_manager.set_error_handler(error_handler)
 
     def on_connect(self, func: Callable[[str], Any] | None) -> None:
-        """Set the function to be called when a client connects.
+        """Replace the callback invoked when a client connects.
 
         Args:
-            func: Callback receiving the client address, or ``None`` to disconnect it.
+            func (Callable[[str], Any] | None): Callback receiving the client
+                address, or ``None`` to unregister the current callback.
         """
         self._on_connect = func
         self._signals_manager.clear_callbacks(_ON_CONNECT_ID)
@@ -153,10 +191,11 @@ class StateServerBase[T: StatesBase]:
             self._signals_manager.add_callback(_ON_CONNECT_ID, func)
 
     def on_disconnect(self, func: Callable[[], Any] | None) -> None:
-        """Set the function to be called when a client disconnects.
+        """Replace the callback invoked when a client disconnects.
 
         Args:
-            func: Callback to invoke, or ``None`` to disconnect it.
+            func (Callable[[], Any] | None): Callback to invoke, or ``None`` to
+                unregister the current callback.
         """
         self._on_disconnect = func
         self._signals_manager.clear_callbacks(_ON_DISCONNECT_ID)
@@ -164,10 +203,12 @@ class StateServerBase[T: StatesBase]:
             self._signals_manager.add_callback(_ON_DISCONNECT_ID, func)
 
     def on_client_message(self, func: Callable[[str], Any] | None) -> None:
-        """Set the function to be called when a client sends a message.
+        """Replace the callback for diagnostic messages from the client.
 
         Args:
-            func: Callback receiving the diagnostic message, or ``None`` to disconnect it.
+            func (Callable[[str], Any] | None): Callback receiving the
+                diagnostic message, or ``None`` to unregister the current
+                callback.
         """
         self._on_client_message = func
         self._signals_manager.clear_callbacks(_CLIENT_MESSAGE_ID)

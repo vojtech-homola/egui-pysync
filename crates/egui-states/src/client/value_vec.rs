@@ -1,3 +1,5 @@
+//! Read-only client mirror of a server-controlled vector.
+
 use parking_lot::RwLock;
 use std::sync::Arc;
 
@@ -11,7 +13,10 @@ pub(crate) trait UpdateList: Sync + Send {
     fn update_list(&self, type_id: u32, header: VecHeader, data: &[u8]) -> Result<(), String>;
 }
 
-/// A server-controlled vector mirrored on the client.
+/// A server-controlled vector mirrored read-only on the client.
+///
+/// Complete replacements and item-level changes arrive from the server; the
+/// client exposes only snapshot and borrowing accessors.
 pub struct VecState<T> {
     name: String,
     type_id: u32,
@@ -38,12 +43,16 @@ impl<T: Typed + Clone> VecState<T> {
     }
 
     /// Borrows the complete vector for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
     pub fn read<R>(&self, mut f: impl FnMut(&Vec<T>) -> R) -> R {
         let l = self.list.read();
         f(&*l)
     }
 
     /// Borrows the item at `idx` for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
     pub fn read_item<R>(&self, idx: usize, mut f: impl FnMut(Option<&T>) -> R) -> R {
         let l = self.list.read();
         f(l.get(idx))

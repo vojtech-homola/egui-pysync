@@ -1,3 +1,5 @@
+//! Server-controlled vector and map handles mirrored to the client.
+
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -47,6 +49,10 @@ where
     }
 
     /// Replaces the item at `index` and optionally requests a repaint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of range or serialization fails.
     pub fn set_item(&self, index: usize, value: T, update: bool) -> Result<()> {
         let data = serialize_bytes(&value)?;
         self.inner
@@ -77,12 +83,20 @@ where
     }
 
     /// Returns the item at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of range or deserialization fails.
     pub fn get_item(&self, index: usize) -> Result<T> {
         let data = self.inner.get_item(index).map_err(ServerError::new)?;
         deserialize_bytes(&data)
     }
 
     /// Removes and returns the item at `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `index` is out of range or deserialization fails.
     pub fn remove_item(&self, index: usize, update: bool) -> Result<T> {
         let data = self
             .inner

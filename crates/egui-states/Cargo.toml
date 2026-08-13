@@ -2,6 +2,11 @@
 name = "egui_states"
 version.workspace = true
 edition.workspace = true
+description = "Typed state synchronization between egui clients and Rust or Python servers"
+documentation = "https://docs.rs/egui_states"
+repository = "https://github.com/vojtech-homola/egui-states"
+license = "MIT"
+readme = "../../README.md"
 
 [features]
 default = ["client"]
