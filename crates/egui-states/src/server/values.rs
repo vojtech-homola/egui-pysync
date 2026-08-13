@@ -1,3 +1,5 @@
+//! Server handles for synchronized scalar values and events.
+
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -189,7 +191,11 @@ where
 }
 
 #[derive(Clone)]
-/// Client-to-server event that does not retain a value.
+/// Event that does not retain a value.
+///
+/// Client emissions arrive at callbacks registered with [`Self::connect`]. On
+/// the server, [`Self::set`] emits directly to those local callbacks; it does
+/// not send an event to the client.
 pub struct Signal<T> {
     server: StateServer,
     id: u64,
@@ -218,6 +224,8 @@ where
     T: Serialize,
 {
     /// Emits an event from the server to local callbacks.
+    ///
+    /// This does not send the event to the client.
     pub fn set(&self, value: T) -> Result<()> {
         let data = serialize_bytes(&value)?;
         self.inner.set(data);
@@ -242,6 +250,8 @@ where
     T: for<'a> Deserialize<'a> + Send + 'static,
 {
     /// Registers a value-taking callback and returns its owning handle.
+    ///
+    /// Retain the returned handle to keep the callback connected.
     pub fn connect(&self, callback: impl Fn(T) + Send + Sync + 'static) -> CallbackHandle {
         self.server.add_typed_callback(self.id, callback)
     }
@@ -249,6 +259,8 @@ where
 
 impl Signal<()> {
     /// Registers a no-argument callback for a unit-valued signal.
+    ///
+    /// Retain the returned handle to keep the callback connected.
     pub fn connect_empty(&self, callback: impl Fn() + Send + Sync + 'static) -> CallbackHandle {
         self.server.add_raw_callback(self.id, move |_, _| {
             callback();

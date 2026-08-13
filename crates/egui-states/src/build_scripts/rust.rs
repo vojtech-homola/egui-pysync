@@ -500,6 +500,26 @@ fn render_rust<S: State>() -> Result<(String, String, String), String> {
 }
 
 /// Generates typed Rust server bindings as a three-file module.
+///
+/// The output directory is created when necessary and receives `mod.rs`,
+/// `enums.rs`, and `structs.rs`. Files whose contents did not change are left
+/// untouched so the generator does not trigger unnecessary recompilation.
+/// Declare the generated directory as a module in the server crate and enable
+/// the `egui_states` `server` feature.
+///
+/// Generated files must not be edited by hand; rebuild them from the shared
+/// Rust [`State`] definition instead.
+///
+/// # Errors
+///
+/// Returns an error if source rendering fails or the output directory/files
+/// cannot be created or written.
+///
+/// # Panics
+///
+/// Panics if a state type is defined inconsistently in different locations or
+/// conflicts with a generated symbol such as `StatesServer`, `enums`,
+/// `structs`, or `s`.
 pub fn generate_rust<S: State>(directory: impl AsRef<Path>) -> Result<(), String> {
     let (states, enums, structs) = render_rust::<S>()?;
     scripts::write_generated_files(

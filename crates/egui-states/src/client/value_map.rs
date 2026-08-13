@@ -1,3 +1,5 @@
+//! Read-only client mirror of a server-controlled map.
+
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -13,7 +15,10 @@ pub(crate) trait UpdateMap: Sync + Send {
     fn update_map(&self, type_id: u32, header: MapHeader, data: &[u8]) -> Result<(), String>;
 }
 
-/// A server-controlled hash map mirrored on the client.
+/// A server-controlled hash map mirrored read-only on the client.
+///
+/// Complete replacements, insertions, and removals arrive from the server; the
+/// client exposes only snapshot and borrowing accessors.
 pub struct MapState<K, V> {
     name: String,
     type_id: u32,
@@ -33,25 +38,29 @@ where
         }
     }
 
-    #[inline]
     /// Returns a copy of the complete map.
+    #[inline]
     pub fn get(&self) -> HashMap<K, V> {
         self.dict.read().clone()
     }
 
-    #[inline]
     /// Returns a copy of the value at `key`, if it exists.
+    #[inline]
     pub fn get_item(&self, key: &K) -> Option<V> {
         self.dict.read().get(key).cloned()
     }
 
     /// Borrows the complete map for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
     pub fn read<R>(&self, mut f: impl FnMut(&HashMap<K, V>) -> R) -> R {
         let d = self.dict.read();
         f(&*d)
     }
 
     /// Borrows the value at `key` for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
     pub fn read_item<R>(&self, key: &K, mut f: impl FnMut(Option<&V>) -> R) -> R {
         let d = self.dict.read();
         let v = d.get(key);

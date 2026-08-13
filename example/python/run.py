@@ -1,4 +1,6 @@
 # ruff: noqa: D103
+"""Run the Python server example and exercise its generated state handles."""
+
 import numpy as np
 from states_server import StatesServer
 from states_server.enums import TestEnum, TestEnum2

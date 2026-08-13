@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "egui-states"
-description = "A Python library for egui-states project."
+description = "Python server bindings for typed state synchronization with egui clients."
 authors = [{ name = "Vojtech Homola", email = "vojhom@outlook.cz" }]
 requires-python = ">=3.12"
 license = { file = "LICENSE" }

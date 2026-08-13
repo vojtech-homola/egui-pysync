@@ -37,6 +37,7 @@ from egui_states._core import (
 )
 from egui_states.signals import SignalsManager
 
+#: Gray, gray-alpha, RGB, or RGBA color whose components are in ``0..255``.
 type ImageColor = int | tuple[int, int] | tuple[int, int, int] | tuple[int, int, int, int]
 
 
@@ -45,7 +46,7 @@ class _CustomStruct:
 
 
 class ISubStates(ABC):
-    """The base class for substates in the UI states."""
+    """Base class for a generated nested state group."""
 
     @abstractmethod
     def __init__(self, parent: str) -> None:
@@ -71,22 +72,23 @@ class _SignalBase(_StaticBase):
         self._signals_manager = signals_manager
 
     def signal_set_to_queue(self) -> None:
-        """Set the value to queue mode.
+        """Preserve every signaled change for server callbacks.
 
-        In queue mode, changes of the value are queued and are all processed with single thread.
+        Changes for one state are delivered in order. Callbacks for different
+        states may still run concurrently when multiple workers are configured.
         """
         self._server.signal_set_to_queue(self._value_id)
 
     def signal_set_to_single(self) -> None:
-        """Set the value to single mode. It is the default mode.
+        """Coalesce pending signaled changes to the latest value.
 
-        In single mode, only the last change of the value is processed.
+        This is the default mode.
         """
         self._server.signal_set_to_single(self._value_id)
 
 
 class Value[T](_SignalBase):
-    """General UI value of type T."""
+    """Bidirectional value stored by both the server and egui client."""
 
     def __init__(self, obj_id: int, initial_value: T, queue: bool = False) -> None:
         self._initial_value = initial_value
@@ -100,20 +102,22 @@ class Value[T](_SignalBase):
         del self._queue
 
     def set(self, value: T, set_signal: bool = False, update: bool = False) -> None:
-        """Set the value of the UI element.
+        """Replace the value and send it to the client.
 
         Args:
-            value: Value to store locally and send to the client.
-            set_signal: Whether to emit callbacks for the new value. Defaults to False.
-            update: Whether to request a client repaint. Defaults to False.
+            value (T): Value to store locally and send to the client.
+            set_signal (bool, optional): Whether to emit callbacks for the new
+                value. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.value_set(self._value_id, value, set_signal, update)
 
     def get(self) -> T:
-        """Get the value of the UI element.
+        """Return the server's current value.
 
         Returns:
-            T: The value of the UI element.
+            T: The current value.
         """
         return self._server.value_get(self._value_id)
 
@@ -121,7 +125,7 @@ class Value[T](_SignalBase):
         """Connect a callback to the value.
 
         Args:
-            callback(Callable[[T], Any]): The callback to connect.
+            callback (Callable[[T], Any]): The callback to connect.
         """
         self._signals_manager.add_callback(self._value_id, callback)
 
@@ -130,23 +134,24 @@ class Value[T](_SignalBase):
 
         The previous value is the one the callback was last notified about, not
         necessarily the immediate predecessor: in single mode successive changes
-        coalesce, so a -> b -> c delivering only c calls the callback with (c, a).
+        coalesce, so a -> b -> c delivering only c calls the callback with
+        (c, a).
 
         Args:
-            callback(Callable[[T, T], Any]): The callback to connect. It is called
-                with the new value followed by the previous one.
+            callback (Callable[[T, T], Any]): The callback to connect. It is
+                called with the new value followed by the previous one.
         """
         self._signals_manager.add_callback_previous(self._value_id, callback)
 
     def disconnect(self, callback: Callable[[T], Any] | Callable[[T, T], Any]) -> None:
         """Disconnect a callback from the value.
 
-        Takes callbacks connected either way, so there is nothing to match up against
-        how the callback was connected.
+        Takes callbacks connected either way, so there is nothing to match up
+        against how the callback was connected.
 
         Args:
-            callback(Callable[[T], Any] | Callable[[T, T], Any]): The callback to
-                disconnect.
+            callback (Callable[[T], Any] | Callable[[T, T], Any]): The callback
+                to disconnect.
         """
         self._signals_manager.remove_callback(self._value_id, callback)
         self._signals_manager.remove_callback_previous(self._value_id, callback)
@@ -157,10 +162,10 @@ class Value[T](_SignalBase):
 
 
 class ValueTake[T](_StaticBase):
-    """ValueTake is a value which can be taken in the UI only once.
+    """One-shot value sent to and consumed once by the client.
 
-    ValueTake does not have a get method, because the value is not stored in the server. It is alternative to Signal,
-    but with opposite transport direction.
+    Unlike :class:`Value`, this is not readable as persistent server state. It
+    is the server-to-client counterpart of :class:`Signal`.
     """
 
     def __init__(self, obj_id: int) -> None:
@@ -171,22 +176,20 @@ class ValueTake[T](_StaticBase):
         del self._obj_id
 
     def set(self, value: T, blocking: bool = False, update: bool = False) -> None:
-        """Set the value of the UI element.
+        """Send a one-shot value to the client.
 
         Args:
-            value(T): The value to set.
-            blocking(bool, optional): Whether the sending a new value with next call waits for acknowledgment from UI.
+            value (T): The value to set.
+            blocking (bool, optional): Whether the next send waits until the
+                client consumes this value. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
                 Defaults to False.
-            update(bool, optional): Whether to update the UI. Defaults to False.
         """
         self._server.value_take_set(self._value_id, value, blocking, update)
 
 
 class ValueTakeEmpty(_StaticBase):
-    """ValueTakeEmpty is a value which can be taken in the UI only once.
-
-    It is alternative to SignalEmpty, but with opposite transport direction.
-    """
+    """Unit-valued one-shot event sent to and consumed once by the client."""
 
     def _initialize(self, name: str, types: list[PyObjectType]) -> None:
         self._value_id = self._server.add_value_take(name, emp)
@@ -195,15 +198,16 @@ class ValueTakeEmpty(_StaticBase):
         """Set the value of the UI element.
 
         Args:
-            blocking(bool, optional): Whether the sending a new value with next call waits for acknowledgment from UI.
+            blocking (bool, optional): Whether the next send waits until the
+                client consumes this value. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
                 Defaults to False.
-            update(bool, optional): Whether to update the UI. Defaults to False.
         """
         self._server.value_take_set(self._value_id, (), blocking, update)
 
 
 class Static[T](_StaticBase):
-    """Numeric static UI value of type T. Static means that the value is not updated in the UI."""
+    """Server-controlled value that the egui client can read but not modify."""
 
     def __init__(self, obj_id: int, initial_value: T) -> None:
         self._initial_value = initial_value
@@ -215,11 +219,12 @@ class Static[T](_StaticBase):
         del self._obj_id
 
     def set(self, value: T, update: bool = False) -> None:
-        """Set the static value of the UI.
+        """Replace the value mirrored to the client.
 
         Args:
-            value(T): The value to set.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            value (T): The value to set.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.static_set(self._value_id, value, update)
 
@@ -233,7 +238,10 @@ class Static[T](_StaticBase):
 
 
 class Signal[T](_SignalBase):
-    """Signal from UI."""
+    """Client-to-server event that does not retain a client-side value.
+
+    Calling :meth:`set` on the server emits the event to local callbacks.
+    """
 
     def __init__(self, obj_id: int, queue: bool = False) -> None:
         self._obj_id = obj_id
@@ -250,7 +258,7 @@ class Signal[T](_SignalBase):
         Signal is emitted to all connected callbacks.
 
         Args:
-            value(T): The value to set.
+            value (T): The value to set.
         """
         self._server.signal_set(self._value_id, value)
 
@@ -258,7 +266,7 @@ class Signal[T](_SignalBase):
         """Connect a callback to the signal.
 
         Args:
-            callback(Callable[[], Any]): The callback to connect.
+            callback (Callable[[T], Any]): Callback receiving the signal value.
         """
         self._signals_manager.add_callback(self._value_id, callback)
 
@@ -266,7 +274,7 @@ class Signal[T](_SignalBase):
         """Disconnect a callback from the value.
 
         Args:
-            callback(Callable[[], Any]): The callback to disconnect.
+            callback (Callable[[T], Any]): Previously connected callback.
         """
         self._signals_manager.remove_callback(self._value_id, callback)
 
@@ -276,7 +284,7 @@ class Signal[T](_SignalBase):
 
 
 class SignalEmpty(_SignalBase):
-    """Empty Signal from UI."""
+    """Unit-valued client-to-server event with no payload argument."""
 
     def __init__(self, queue: bool = False) -> None:
         self._queue = queue
@@ -296,7 +304,7 @@ class SignalEmpty(_SignalBase):
         """Connect a callback to the signal.
 
         Args:
-            callback(Callable[[], Any]): The callback to connect.
+            callback (Callable[[], Any]): The callback to connect.
         """
         self._signals_manager.add_callback(self._value_id, callback)
 
@@ -304,7 +312,7 @@ class SignalEmpty(_SignalBase):
         """Disconnect a callback from the value.
 
         Args:
-            callback(Callable[[], Any]): The callback to disconnect.
+            callback (Callable[[], Any]): The callback to disconnect.
         """
         self._signals_manager.remove_callback(self._value_id, callback)
 
@@ -314,7 +322,7 @@ class SignalEmpty(_SignalBase):
 
 
 class Image(_StaticBase):
-    """Image UI element."""
+    """Server-controlled image mirrored to an initialized client texture."""
 
     def _initialize(self, name: str, types: list[PyObjectType]) -> None:
         self._value_id = self._server.add_image(name)
@@ -327,8 +335,9 @@ class Image(_StaticBase):
         """Set the image in the UI image.
 
         Args:
-            image(Buffer): The image to set.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            image (Buffer): The image to set.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.image_set(self._value_id, image, update)
 
@@ -342,10 +351,12 @@ class Image(_StaticBase):
         """Update a rectangular part of the image.
 
         Args:
-            image(Buffer): The image rectangle to write.
-            origin(list[int] | tuple[int, int]): Top-left origin as (height, width) or (y, x).
-            update(bool, optional): Whether to update the UI. Defaults to False.
-            force(bool, optional): Whether to replace a pending update for the same rectangle. Defaults to False.
+            image (Buffer): The image rectangle to write.
+            origin (list[int] | tuple[int, int]): Top-left origin as ``(y, x)``.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+            force (bool, optional): Whether to replace a pending update for the
+                same rectangle. Defaults to False.
         """
         self._server.image_update(self._value_id, image, origin, update, force)
 
@@ -358,9 +369,12 @@ class Image(_StaticBase):
         """Fill the complete image with one color using a compact message.
 
         Args:
-            shape(list[int] | tuple[int, int]): Image shape as (height, width).
-            color(ImageColor): Gray, gray-alpha, RGB, or RGBA color. Every component must be 0..255.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            shape (list[int] | tuple[int, int]): Image shape as ``(height,
+                width)``.
+            color (ImageColor): Gray, gray-alpha, RGB, or RGBA color. Every
+                component must be in ``0..255``.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.image_set_all(self._value_id, shape, color, update)
 
@@ -379,7 +393,7 @@ class Image(_StaticBase):
         """Get the shape of the image.
 
         Returns:
-            tuple[int, int]: The shape of the image (height, width) or (y, x).
+            tuple[int, int]: Image shape as ``(height, width)``.
         """
         return self._server.image_size(self._value_id)
 
@@ -462,7 +476,7 @@ class ImageMulti(_StaticBase):
 
 
 class Map[K, V](_StaticBase):
-    """Dict UI element."""
+    """Server-controlled dictionary mirrored read-only to the client."""
 
     def __init__(self, key_id: int, value_id: int) -> None:
         self._key_id = key_id
@@ -477,8 +491,9 @@ class Map[K, V](_StaticBase):
         """Set the dict in the UI dict.
 
         Args:
-            value(dict[K, V]): The dict to set.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            value (dict[K, V]): The dictionary to set.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.map_set(self._value_id, value, update)
 
@@ -486,7 +501,7 @@ class Map[K, V](_StaticBase):
         """Get the dict in the UI dict.
 
         Returns:
-            dict[K, V]: The dict in the UI dict.
+            dict[K, V]: The dictionary in the UI state.
         """
         return self._server.map_get(self._value_id)
 
@@ -494,9 +509,10 @@ class Map[K, V](_StaticBase):
         """Set the item in the UI dict.
 
         Args:
-            key(K): The key of the item.
-            value(V): The value of the item.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            key (K): The key of the item.
+            value (V): The value of the item.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.map_set_item(self._value_id, key, value, update)
 
@@ -504,7 +520,7 @@ class Map[K, V](_StaticBase):
         """Get the item in the UI dict.
 
         Args:
-            key(K): The key of the item.
+            key (K): The key of the item.
 
         Returns:
             V: The value of the item.
@@ -515,8 +531,9 @@ class Map[K, V](_StaticBase):
         """Remove the item from the UI dict.
 
         Args:
-            key(K): The key of the item.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            key (K): The key of the item.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.map_del_item(self._value_id, key, update)
 
@@ -534,7 +551,7 @@ class Map[K, V](_StaticBase):
 
 
 class Vec[T](_StaticBase):
-    """Vec UI element."""
+    """Server-controlled list mirrored read-only to the client."""
 
     def __init__(self, obj_id: int) -> None:
         self._obj_id = obj_id
@@ -547,8 +564,9 @@ class Vec[T](_StaticBase):
         """Set the list in the UI list.
 
         Args:
-            value(list[T]): The list to set.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            value (list[T]): The list to set.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.list_set(self._value_id, value, update)
 
@@ -556,7 +574,7 @@ class Vec[T](_StaticBase):
         """Get the list in the UI list.
 
         Returns:
-            list[T]: The list in the UI list.
+            list[T]: The list in the UI state.
         """
         return self._server.list_get(self._value_id)
 
@@ -564,9 +582,10 @@ class Vec[T](_StaticBase):
         """Set the item in the UI list.
 
         Args:
-            idx(int): The index of the item.
-            value(T): The value of the item.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            idx (int): The index of the item.
+            value (T): The value of the item.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.list_set_item(self._value_id, idx, value, update)
 
@@ -574,7 +593,7 @@ class Vec[T](_StaticBase):
         """Get the item in the UI list.
 
         Args:
-            idx(int): The index of the item.
+            idx (int): The index of the item.
 
         Returns:
             T: The value of the item.
@@ -585,8 +604,9 @@ class Vec[T](_StaticBase):
         """Remove the item from the UI list.
 
         Args:
-            idx(int): The index of the item.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            idx (int): The index of the item.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.list_del_item(self._value_id, idx, update)
 
@@ -594,8 +614,9 @@ class Vec[T](_StaticBase):
         """Add the item to the UI list.
 
         Args:
-            value(T): The value of the item.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            value (T): The value of the item.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.list_append_item(self._value_id, value, update)
 
@@ -633,7 +654,9 @@ class Data[T: np.generic](_StaticBase):
     """Contiguous NumPy-compatible numeric buffer mirrored to the client.
 
     Args:
-        dtype: NumPy scalar type used to interpret and validate the buffer.
+        dtype (type[T]): One of ``numpy.uint8`` through ``numpy.uint64``,
+            ``numpy.int8`` through ``numpy.int64``, ``numpy.float32``, or
+            ``numpy.float64``.
     """
 
     def __init__(self, dtype: type[T]) -> None:
@@ -643,10 +666,13 @@ class Data[T: np.generic](_StaticBase):
         self._value_id = self._server.add_data(name, _get_dtype_id(self._dtype))
 
     def get(self) -> npt.NDArray[T]:
-        """Get the data from the UI data.
+        """Return a locally mutable snapshot of the current server buffer.
+
+        Mutating the returned array does not update the server state or client;
+        call :meth:`set` to publish modified data.
 
         Returns:
-            npt.NDArray[T]: The data in the UI data.
+            npt.NDArray[T]: A NumPy view backed by a copied ``bytearray``.
         """
         data = self._server.data_get(self._value_id)
         return np.frombuffer(data, dtype=self._dtype)
@@ -655,8 +681,10 @@ class Data[T: np.generic](_StaticBase):
         """Set the data in the UI data.
 
         Args:
-            data(Buffer): The data to set. Has to implement the buffer protocol (numpy array).
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Data to set. NumPy arrays and other buffer-protocol
+                objects are accepted.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_set(self._value_id, data, update)
 
@@ -664,8 +692,10 @@ class Data[T: np.generic](_StaticBase):
         """Add the data to the UI data.
 
         Args:
-            data(Buffer): The data to add. Has to implement the buffer protocol (numpy array).
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Data to append. NumPy arrays and other
+                buffer-protocol objects are accepted.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_add(self._value_id, data, update)
 
@@ -673,9 +703,11 @@ class Data[T: np.generic](_StaticBase):
         """Replace the data in the UI data.
 
         Args:
-            data(Buffer): The data to replace. Has to implement the buffer protocol (numpy array).
-            index(int): The index of the data to replace.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Replacement data. NumPy arrays and other
+                buffer-protocol objects are accepted.
+            index (int): Index at which replacement starts.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_replace(self._value_id, data, index, update)
 
@@ -683,9 +715,10 @@ class Data[T: np.generic](_StaticBase):
         """Remove the data from the UI data.
 
         Args:
-            index(int): The index of the data to remove.
-            count(int): The number of data to remove.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            index (int): Index at which removal starts.
+            count (int): Number of items to remove.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_remove(self._value_id, index, count, update)
 
@@ -693,7 +726,8 @@ class Data[T: np.generic](_StaticBase):
         """Clear the data in the UI data.
 
         Args:
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_clear(self._value_id, update)
 
@@ -702,7 +736,8 @@ class DataTake[T: np.generic](_StaticBase):
     """One-shot numeric buffer sent to and consumed by the client.
 
     Args:
-        dtype: NumPy scalar type used to validate the outgoing buffer.
+        dtype (type[T]): One of the integer or floating-point NumPy scalar
+            types supported by :class:`Data`.
     """
 
     def __init__(self, dtype: type[T]) -> None:
@@ -720,16 +755,19 @@ class DataTake[T: np.generic](_StaticBase):
     ) -> None:
         """Set the data in the UI DataTake.
 
-        DataTake does not have a get method, because the data is not stored in the server.
-        It is alternative to Signal, but with opposite transport direction.
+        DataTake does not have a get method because the data is not stored in
+        the server. It is an alternative to Signal with the opposite transport
+        direction.
 
         Args:
-            data(Buffer): The data to set. Has to implement the buffer protocol (numpy array).
-            blocking(bool, optional): Whether the sending a new value with next call waits for acknowledgment from UI.
+            data (Buffer): Data to send. NumPy arrays and other buffer-protocol
+                objects are accepted.
+            blocking (bool, optional): Whether the next send waits until the
+                client consumes this data. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
                 Defaults to False.
-            update(bool, optional): Whether to update the UI. Defaults to False.
-            cache(bool, optional): Whether to cache the data in the server. Defaults to False. If True, the last sent
-                data is cached in the server and synced with the UI during initialization of the UI.
+            cache (bool, optional): Whether to cache the last sent data so a
+                newly initialized client receives it. Defaults to False.
         """
         self._server.data_take_set(self._value_id, data, blocking, update, cache)
 
@@ -748,10 +786,13 @@ class SingleData[T: np.generic]:
         self._index = index
 
     def get(self) -> npt.NDArray[T]:
-        """Get the data from the UI data at this index.
+        """Return a locally mutable snapshot of the buffer at this index.
+
+        Mutating the array does not update the server state or client; call
+        :meth:`set` to publish modified data.
 
         Returns:
-            npt.NDArray[T]: The data in the UI data at this index.
+            npt.NDArray[T]: A NumPy view backed by a copied ``bytearray``.
         """
         data = self._server.data_multi_get(self._value_id, self._index)
         return np.frombuffer(data, dtype=self._dtype)
@@ -760,8 +801,10 @@ class SingleData[T: np.generic]:
         """Set the data in the UI data at this index.
 
         Args:
-            data(Buffer): The data to set. Has to implement the buffer protocol (numpy array).
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Data to set. NumPy arrays and other buffer-protocol
+                objects are accepted.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_set(self._value_id, self._index, data, update)
 
@@ -769,8 +812,10 @@ class SingleData[T: np.generic]:
         """Add the data to the UI data at this index.
 
         Args:
-            data(Buffer): The data to add. Has to implement the buffer protocol (numpy array).
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Data to append. NumPy arrays and other
+                buffer-protocol objects are accepted.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_add(self._value_id, self._index, data, update)
 
@@ -778,9 +823,11 @@ class SingleData[T: np.generic]:
         """Replace the data in the UI data at this index.
 
         Args:
-            data(Buffer): The data to replace. Has to implement the buffer protocol (numpy array).
-            index(int): The index of the data to replace within this single data.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            data (Buffer): Replacement data. NumPy arrays and other
+                buffer-protocol objects are accepted.
+            index (int): Index at which replacement starts within this buffer.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_replace(self._value_id, self._index, data, index, update)
 
@@ -788,9 +835,10 @@ class SingleData[T: np.generic]:
         """Remove the data from the UI data at this index.
 
         Args:
-            index(int): The index of the data to remove within this single data.
-            count(int): The number of data items to remove.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            index (int): Index at which removal starts within this buffer.
+            count (int): Number of items to remove.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_remove(self._value_id, self._index, index, count, update)
 
@@ -798,7 +846,8 @@ class SingleData[T: np.generic]:
         """Clear the data in the UI data at this index.
 
         Args:
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_clear(self._value_id, self._index, update)
 
@@ -807,7 +856,8 @@ class DataMulti[T: np.generic](_StaticBase):
     """Collection of numeric buffers indexed by non-negative integers.
 
     Args:
-        dtype: NumPy scalar type used to interpret and validate every buffer.
+        dtype (type[T]): One of the integer or floating-point NumPy scalar
+            types supported by :class:`Data`.
     """
 
     def __init__(self, dtype: type[T]) -> None:
@@ -820,10 +870,10 @@ class DataMulti[T: np.generic](_StaticBase):
         """Get the SingleData object for the given index.
 
         Args:
-            index(int): The index of the SingleData object.
+            index (int): The index of the ``SingleData`` object.
 
         Returns:
-            SingleData[T]: The SingleData object for the given index.
+            SingleData[T]: The ``SingleData`` object for the given index.
         """
         return SingleData(self._dtype, self._server, self._value_id, index)
 
@@ -831,8 +881,9 @@ class DataMulti[T: np.generic](_StaticBase):
         """Remove the given index from the DataMulti.
 
         Args:
-            index(int): The index to remove.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            index (int): The index to remove.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_remove_index(self._value_id, index, update)
 
@@ -840,7 +891,8 @@ class DataMulti[T: np.generic](_StaticBase):
         """Reset (clear all indices) in the DataMulti.
 
         Args:
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_reset(self._value_id, update)
 
@@ -867,11 +919,14 @@ class SingleDataTake[T: np.generic]:
         """Set the data in the UI DataMultiTake at this index.
 
         Args:
-            data(Buffer): The data to set. Has to implement the buffer protocol (numpy array).
-            blocking(bool, optional): Whether the sending a new value with next call waits for acknowledgment from UI.
+            data (Buffer): Data to send. NumPy arrays and other buffer-protocol
+                objects are accepted.
+            blocking (bool, optional): Whether the next send waits until the
+                client consumes this data. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
                 Defaults to False.
-            update(bool, optional): Whether to update the UI. Defaults to False.
-            cache(bool, optional): Whether to cache the data in the server. Defaults to False.
+            cache (bool, optional): Whether to cache the last sent data for a
+                newly initialized client. Defaults to False.
         """
         self._server.data_multi_take_set(
             self._value_id,
@@ -887,7 +942,8 @@ class DataMultiTake[T: np.generic](_StaticBase):
     """Keyed one-shot numeric buffers sent to and consumed by the client.
 
     Args:
-        dtype: NumPy scalar type used to validate every outgoing buffer.
+        dtype (type[T]): One of the integer or floating-point NumPy scalar
+            types supported by :class:`Data`.
     """
 
     def __init__(self, dtype: type[T]) -> None:
@@ -903,10 +959,11 @@ class DataMultiTake[T: np.generic](_StaticBase):
         """Get the SingleDataTake object for the given index.
 
         Args:
-            index(int): The index of the SingleDataTake object.
+            index (int): The index of the ``SingleDataTake`` object.
 
         Returns:
-            SingleDataTake[T]: The SingleDataTake object for the given index.
+            SingleDataTake[T]: The ``SingleDataTake`` object for the given
+                index.
         """
         return SingleDataTake(self._dtype, self._server, self._value_id, index)
 
@@ -914,8 +971,9 @@ class DataMultiTake[T: np.generic](_StaticBase):
         """Remove the given index from the DataMultiTake.
 
         Args:
-            index(int): The index to remove.
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            index (int): The index to remove.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_take_remove_index(self._value_id, index, update)
 
@@ -923,7 +981,8 @@ class DataMultiTake[T: np.generic](_StaticBase):
         """Reset (clear all indices) in the DataMultiTake.
 
         Args:
-            update(bool, optional): Whether to update the UI. Defaults to False.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
         """
         self._server.data_multi_take_reset(self._value_id, update)
 
@@ -956,5 +1015,5 @@ __all__ = [
     "map",
     "ImageColor",
     "_CustomStruct",
-    "PyObjectType"
+    "PyObjectType",
 ]

@@ -1,3 +1,5 @@
+//! Log messages emitted by the connected client.
+
 use crate::server_core::signals::LOGGING_ID;
 
 use super::callbacks::CallbackHandle;
@@ -5,6 +7,8 @@ use super::state_server::{StateServer, deserialize_bytes};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Severity attached to a log message sent by the client.
+///
+/// The wire ids are `Debug = 0`, `Info = 1`, `Warning = 2`, and `Error = 3`.
 pub enum LogLevel {
     /// Diagnostic information useful while debugging.
     Debug,

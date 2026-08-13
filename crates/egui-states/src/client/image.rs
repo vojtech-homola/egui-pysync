@@ -1,3 +1,5 @@
+//! Client image state backed by an egui texture.
+
 use parking_lot::{Mutex, RwLock};
 use std::ptr::copy_nonoverlapping;
 use std::sync::Arc;
@@ -54,7 +56,8 @@ impl ImageMessage {
 /// A server-controlled RGBA texture used by the egui client.
 ///
 /// Call [`Self::initialize`] once with an egui context before expecting server
-/// image updates to become visible.
+/// image updates to become visible. Updates received before initialization are
+/// validated and acknowledged but cannot be applied to a texture.
 pub struct Image {
     name: Arc<String>,
     id: u64,
@@ -97,7 +100,10 @@ impl Image {
 
     /// Creates the egui texture with an initial image.
     ///
-    /// Subsequent calls are ignored after the handle has been initialized.
+    /// Call this from the UI before connecting when the server may send an image
+    /// immediately. Subsequent calls are ignored after initialization, even if
+    /// they use a different context or image. The texture uses nearest-neighbor
+    /// filtering and clamps sampling at its edges.
     pub fn initialize(&self, ctx: &egui::Context, image: ColorImage) {
         let image_data = ImageData::Color(Arc::new(image));
         let name = format!("image_{}", self.id);
@@ -651,6 +657,13 @@ fn create_color_image(
     Ok(image)
 }
 
+/// Converts `pixel_count` source pixels into egui's four-byte pixel storage.
+///
+/// # Safety
+///
+/// `data_ptr` must point to at least `pixel_count * bytes_per_pixel` readable
+/// bytes for `image_type`. `image_ptr` must point to at least
+/// `pixel_count * 4` writable bytes, and the two regions must not overlap.
 unsafe fn fill_c_image(
     image_type: ImageType,
     data_ptr: *const u8,

@@ -1,3 +1,5 @@
+//! Protocol-level type descriptions used to validate peer compatibility.
+
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -109,7 +111,11 @@ impl Hash for ObjectType {
 }
 
 impl ObjectType {
-    /// Returns the stable protocol hash for this type description.
+    /// Returns the stable, platform-independent protocol hash for this type.
+    ///
+    /// The hash uses fixed discriminants and the declared order of tuple,
+    /// struct, and enum members. A change to the serialized shape therefore
+    /// changes the compatibility hash.
     pub fn get_hash(&self) -> u32 {
         let mut hasher = StableHasher::new();
         self.hash(&mut hasher);
@@ -129,6 +135,8 @@ impl ObjectType {
 ///
 /// Use [`egui_states::typed`](crate::typed) for user-defined structs and enums
 /// instead of implementing this trait manually.
+/// Implementations are provided for primitives, `String`, unit, `Option`,
+/// tuples up to arity ten, arrays, vectors, and hash maps.
 ///
 /// # Safety
 ///

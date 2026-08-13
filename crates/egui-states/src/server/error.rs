@@ -1,3 +1,5 @@
+//! Error type returned by the native server API.
+
 use std::fmt;
 
 /// Result type returned by the native server API.
@@ -5,6 +7,9 @@ pub type Result<T> = std::result::Result<T, ServerError>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Error reported by the native state server.
+///
+/// It carries a human-readable message and implements [`std::error::Error`] for
+/// use with ordinary Rust error propagation and reporting.
 pub struct ServerError {
     message: String,
 }

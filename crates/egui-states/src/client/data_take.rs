@@ -1,3 +1,5 @@
+//! One-shot client handles for numeric buffers sent by the server.
+
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -57,7 +59,8 @@ pub(crate) trait UpdateDataTake: Sync + Send {
 
 /// A one-shot numeric buffer sent from the server to the client.
 ///
-/// Taking a blocking transfer also sends its acknowledgement to the server.
+/// A transfer becomes available only after every batch has arrived. Taking a
+/// blocking transfer also sends its acknowledgement to the server.
 pub struct DataTake<T> {
     name: Arc<String>,
     id: u64,
@@ -85,7 +88,10 @@ where
         }
     }
 
-    /// Removes and returns the pending buffer, if one has arrived.
+    /// Removes and returns the completed pending buffer, if one has arrived.
+    ///
+    /// Each buffer can be taken once. Taking a blocking transfer acknowledges
+    /// it and allows the server to send the next pending transfer.
     pub fn take(&self) -> Option<Vec<T>> {
         let inner = self.inner.write().take();
         if let Some((val, blocking)) = inner {
@@ -97,7 +103,9 @@ where
         None
     }
 
-    /// Returns whether a buffer is waiting to be taken.
+    /// Returns whether a completed buffer is waiting to be taken.
+    ///
+    /// A batch still being received does not count as pending.
     pub fn is_some(&self) -> bool {
         self.inner.read().is_some()
     }
@@ -363,6 +371,9 @@ pub(crate) trait UpdateDataMultiTake: Sync + Send {
 }
 
 /// Keyed one-shot numeric buffers sent from the server to the client.
+///
+/// Each `u32` key has an independent pending transfer; taking one key does not
+/// consume or acknowledge any other key.
 pub struct DataMultiTake<T> {
     name: Arc<String>,
     id: u64,
@@ -390,7 +401,10 @@ where
         }
     }
 
-    /// Removes and returns the pending buffer at `key`, if present.
+    /// Removes and returns the completed pending buffer at `key`, if present.
+    ///
+    /// Taking a blocking transfer acknowledges it and allows the server to send
+    /// the next transfer for that key.
     pub fn take(&self, key: u32) -> Option<Vec<T>> {
         let inner = self.inner.write().remove(&key);
         if let Some((val, blocking)) = inner {
@@ -402,7 +416,7 @@ where
         None
     }
 
-    /// Returns whether a buffer at `key` is waiting to be taken.
+    /// Returns whether a completed buffer at `key` is waiting to be taken.
     pub fn is_some(&self, key: u32) -> bool {
         self.inner.read().contains_key(&key)
     }
