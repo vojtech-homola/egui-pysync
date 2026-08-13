@@ -34,7 +34,8 @@ The main state types describe both the stored data and its direction:
 - `Data<T>` and `DataMulti<T>` efficiently synchronize numeric buffers; Python
   exposes them as NumPy arrays.
 - `Image` synchronizes complete images or rectangular updates to an egui
-  texture.
+  texture; `ImageMulti` provides a sparse, server-controlled collection of
+  textures indexed by `u32` keys.
 
 State paths follow the Rust field hierarchy. A field named `counter` on the
 root state is registered as `root.counter`; a field inside `controls` becomes

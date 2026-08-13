@@ -21,7 +21,9 @@ use crate::server_core::server::Server;
 use crate::server_core::signals::{self, SignalsManager};
 use crate::server_core::value_parsing::{ValueCreator, ValueParser};
 use crate::server_core::values_core::{SignalCore, ValueCore, ValueStaticCore, ValueTakeCore};
-use crate::server_core::{image_core::Image, map_core::ValueMap, vec_core::ValueList};
+use crate::server_core::{
+    image_core::Image, image_multi_core::ImageMulti, map_core::ValueMap, vec_core::ValueList,
+};
 
 struct ValuesInner {
     values: NoHashMap<u64, (Arc<ValueCore>, PyObjectType)>,
@@ -32,6 +34,7 @@ struct ValuesInner {
     maps: NoHashMap<u64, (Arc<ValueMap>, PyObjectType)>,
     lists: NoHashMap<u64, (Arc<ValueList>, PyObjectType)>,
     images: NoHashMap<u64, Arc<Image>>,
+    image_multi: NoHashMap<u64, Arc<ImageMulti>>,
     data: NoHashMap<u64, Arc<Data>>,
     data_take: NoHashMap<u64, Arc<DataTake>>,
     data_multi: NoHashMap<u64, Arc<DataMulti>>,
@@ -94,6 +97,14 @@ impl StateServerCore {
         match self.get_values()?.images.get(&value_id) {
             Some(image) => Ok(image),
             _ => Err(PyValueError::new_err("Image with ID not found.")),
+        }
+    }
+
+    #[inline]
+    fn inner_image_multi(&self, value_id: u64) -> PyResult<&Arc<ImageMulti>> {
+        match self.get_values()?.image_multi.get(&value_id) {
+            Some(images) => Ok(images),
+            _ => Err(PyValueError::new_err("ImageMulti with ID not found.")),
         }
     }
 
@@ -243,6 +254,7 @@ impl StateServerCore {
                 }
 
                 let images = states.images;
+                let image_multi = states.image_multi;
                 let data = states.data;
                 let data_take = states.data_take;
                 let data_multi = states.data_multi;
@@ -257,6 +269,7 @@ impl StateServerCore {
                     maps,
                     lists,
                     images,
+                    image_multi,
                     data,
                     data_take,
                     data_multi,
@@ -328,6 +341,9 @@ impl StateServerCore {
         }
         if let Some(image) = values.images.get(&value_id) {
             return Ok(image.name.clone());
+        }
+        if let Some(images) = values.image_multi.get(&value_id) {
+            return Ok(images.name.clone());
         }
         if let Some(data) = values.data.get(&value_id) {
             return Ok(data.name.clone());
@@ -760,6 +776,114 @@ impl StateServerCore {
                 )
                 .map_err(|e| PyValueError::new_err(e))
         })
+    }
+
+    // image multi ------------------------------------------------------
+    fn image_multi_size(&self, value_id: u64, index: u32) -> PyResult<(usize, usize)> {
+        let size = self
+            .inner_image_multi(value_id)?
+            .get_size(index)
+            .ok_or_else(|| PyValueError::new_err("ImageMulti index not found."))?;
+        Ok((size[0], size[1]))
+    }
+
+    fn image_multi_get<'py>(
+        &self,
+        py: Python<'py>,
+        value_id: u64,
+        index: u32,
+    ) -> PyResult<(Bound<'py, PyByteArray>, (usize, usize))> {
+        self.inner_image_multi(value_id)?.get_image(index, |image| {
+            let (data, size) =
+                image.ok_or_else(|| PyValueError::new_err("ImageMulti index not found."))?;
+            Ok((PyByteArray::new(py, data), (size[0], size[1])))
+        })
+    }
+
+    #[pyo3(signature = (value_id, index, image, update))]
+    fn image_multi_set(
+        &self,
+        py: Python,
+        value_id: u64,
+        index: u32,
+        image: PyBuffer<u8>,
+        update: bool,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            let images = self.inner_image_multi(value_id)?;
+            let image_data = pyimage::image_multi_data(&image)?;
+            images
+                .set_image(index, image_data, update)
+                .map_err(PyValueError::new_err)
+        })
+    }
+
+    #[pyo3(signature = (value_id, index, shape, color, update))]
+    fn image_multi_set_all(
+        &self,
+        py: Python,
+        value_id: u64,
+        index: u32,
+        shape: [usize; 2],
+        color: &Bound<'_, PyAny>,
+        update: bool,
+    ) -> PyResult<()> {
+        let rgba = pyimage::image_color(color)?;
+        py.detach(|| {
+            self.inner_image_multi(value_id)?
+                .set_all_image(index, shape, rgba, update)
+                .map_err(PyValueError::new_err)
+        })
+    }
+
+    #[pyo3(signature = (value_id, index, image, origin, update, force=false))]
+    fn image_multi_update(
+        &self,
+        py: Python,
+        value_id: u64,
+        index: u32,
+        image: PyBuffer<u8>,
+        origin: [u32; 2],
+        update: bool,
+        force: bool,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            let images = self.inner_image_multi(value_id)?;
+            let image_data = pyimage::image_multi_data(&image)?;
+            images
+                .update_image(
+                    index,
+                    &[origin[0] as usize, origin[1] as usize],
+                    image_data,
+                    update,
+                    force,
+                )
+                .map_err(PyValueError::new_err)
+        })
+    }
+
+    fn image_multi_remove_index(&self, value_id: u64, index: u32, update: bool) -> PyResult<()> {
+        self.inner_image_multi(value_id)?
+            .remove_index(index, update)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn image_multi_reset(&self, value_id: u64, update: bool) -> PyResult<()> {
+        self.inner_image_multi(value_id)?
+            .reset_images(update)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn image_multi_len(&self, value_id: u64) -> PyResult<usize> {
+        Ok(self.inner_image_multi(value_id)?.len())
+    }
+
+    fn image_multi_contains(&self, value_id: u64, index: u32) -> PyResult<bool> {
+        Ok(self.inner_image_multi(value_id)?.contains(index))
+    }
+
+    fn image_multi_indices(&self, value_id: u64) -> PyResult<Vec<u32>> {
+        Ok(self.inner_image_multi(value_id)?.indices())
     }
 
     // data -------------------------------------------------------------
@@ -1247,6 +1371,15 @@ impl StateServerCore {
             .write()
             .add_image(&name)
             .map_err(|e| PyValueError::new_err(format!("Failed to add ValueImage: {}", e)))?;
+        Ok(value_id)
+    }
+
+    fn add_image_multi(&self, name: String) -> PyResult<u64> {
+        let value_id = self
+            .server
+            .write()
+            .add_image_multi(&name)
+            .map_err(|e| PyValueError::new_err(format!("Failed to add ImageMulti: {}", e)))?;
         Ok(value_id)
     }
 

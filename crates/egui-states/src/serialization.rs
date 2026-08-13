@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::collections::{MapHeader, VecHeader};
 use crate::data_transport;
-use crate::image_transport::ImageHeader;
+use crate::image_transport::{ImageHeader, ImageMultiHeader};
 
 // TODO: make these constants configurable
 pub(crate) const VALUE_MAX_SIZE: usize = 1024 * 1024; // 1 MB
@@ -220,6 +220,7 @@ pub(crate) enum ServerHeader {
     ValueVec(u64, u32, bool, VecHeader, u32),
     ValueMap(u64, u32, bool, MapHeader, u32),
     Update(f32),
+    ImageMulti(u64, ImageMultiHeader),
 }
 
 #[cfg(any(feature = "server", feature = "python"))]
@@ -410,7 +411,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{VALUE_MAX_SIZE, check_value_size};
+    use super::*;
+    use crate::image_transport::{ImageHeader, ImageMultiHeader};
 
     #[test]
     fn value_size_limit_is_inclusive() {
@@ -420,5 +422,29 @@ mod tests {
         let error = check_value_size("root.value", VALUE_MAX_SIZE + 1).unwrap_err();
         assert!(error.contains("root.value"), "{error}");
         assert!(error.contains(&(VALUE_MAX_SIZE + 1).to_string()), "{error}");
+    }
+
+    fn first_byte<const N: usize>(data: &FastVec<N>) -> u8 {
+        match data {
+            FastVec::Heap(data) => data[0],
+            FastVec::Stack(data) => data.as_ref()[0],
+        }
+    }
+
+    #[test]
+    fn image_multi_is_appended_to_the_server_header_protocol() {
+        let image: FastVec<32> = serialize(&ServerHeader::Image(
+            1,
+            ImageHeader::Fill([1, 1], [0; 4], false),
+            0,
+        ))
+        .unwrap();
+        let update: FastVec<32> = serialize(&ServerHeader::Update(0.0)).unwrap();
+        let image_multi: FastVec<32> =
+            serialize(&ServerHeader::ImageMulti(1, ImageMultiHeader::Reset(false))).unwrap();
+
+        assert_eq!(first_byte(&image), 3);
+        assert_eq!(first_byte(&update), 10);
+        assert_eq!(first_byte(&image_multi), 11);
     }
 }

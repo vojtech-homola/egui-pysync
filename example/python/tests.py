@@ -201,6 +201,53 @@ def test_image_value_roundtrip(server_bundle: tuple[StatesServer, State, list[Ex
         states.image.image.set_all((0, 3), 1)
 
 
+def test_image_multi_sparse_collection(server_bundle: tuple[StatesServer, State, list[Exception]]) -> None:
+    _server, states, _errors = server_bundle
+    images = states.image.images
+
+    assert len(images) == 0
+    assert images.indices() == []
+    assert 7 not in images
+    with pytest.raises(ValueError, match="ImageMulti index not found"):
+        images[7].get()
+    with pytest.raises(ValueError, match="ImageMulti index not found"):
+        images[7].update(np.zeros((1, 1), dtype=np.uint8), (0, 0))
+
+    images[7].set_all((3, 4), (1, 2, 3, 4))
+    gray = np.arange(6, dtype=np.uint8).reshape((2, 3))
+    images[2].set(gray)
+    assert len(images) == 2
+    assert images.indices() == [2, 7]
+    assert 2 in images
+    assert images[7].shape() == (3, 4)
+    np.testing.assert_array_equal(
+        images[7].get(),
+        np.tile(np.array([1, 2, 3, 4], dtype=np.uint8), (3, 4, 1)),
+    )
+
+    patch = np.full((1, 2, 4), [20, 30, 40, 50], dtype=np.uint8)
+    images[7].update(patch, origin=(1, 1), update=True)
+    np.testing.assert_array_equal(images[7].get()[1:2, 1:3], patch)
+
+    images[7].set_all((1, 2), 9)
+    assert len(images) == 2
+    assert images[7].shape() == (1, 2)
+
+    with pytest.raises(BufferError):
+        images[9].set(np.zeros((1, 1), dtype=np.int16))
+    assert 9 not in images
+    with pytest.raises(OverflowError):
+        images[-1].set_all((1, 1), 0)
+
+    images.remove_index(100)
+    assert len(images) == 2
+    images.remove_index(2, update=True)
+    assert images.indices() == [7]
+    images.reset(update=True)
+    assert len(images) == 0
+    assert images.indices() == []
+
+
 def test_data_array_methods(server_bundle: tuple[StatesServer, State, list[Exception]]) -> None:
     _server, states, _errors = server_bundle
 

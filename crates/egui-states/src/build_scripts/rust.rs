@@ -222,6 +222,7 @@ fn state_field_type(state: &StateType) -> String {
             format!("s::DataMultiTake<{}>", data_type_to_rust_type(typ))
         }
         StateType::Image(_) => "s::Image".to_string(),
+        StateType::ImageMulti(_) => "s::ImageMulti".to_string(),
         StateType::SubState(_, state_class, _) => state_class.to_string(),
     }
 }
@@ -232,6 +233,7 @@ fn state_field_doc(state: &StateType) -> &'static str {
         StateType::ValueTake(..) => "One-shot value consumed by the client.",
         StateType::Static(..) => "Server-controlled value mirrored to the client.",
         StateType::Image(..) => "Server-controlled image mirrored to the client.",
+        StateType::ImageMulti(..) => "Server-controlled keyed images mirrored to the client.",
         StateType::ValueMap(..) => "Server-controlled map mirrored to the client.",
         StateType::ValueVec(..) => "Server-controlled vector mirrored to the client.",
         StateType::Signal(..) => "Client-to-server event.",
@@ -300,6 +302,12 @@ fn state_initializer(state: &StateType) -> String {
         ),
         StateType::Image(name) => {
             format!("s::Image::new(server, format!(\"{{parent}}.{}\"))?", name)
+        }
+        StateType::ImageMulti(name) => {
+            format!(
+                "s::ImageMulti::new(server, format!(\"{{parent}}.{}\"))?",
+                name
+            )
         }
         StateType::SubState(name, state_class, _) => format!(
             "{state_class}::new(server, &format!(\"{{parent}}.{}\"))?",

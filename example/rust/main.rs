@@ -304,6 +304,36 @@ fn main() -> s::Result<()> {
         false,
     )?;
 
+    // Populate a sparse image collection. Reset/remove are shown before the
+    // final two keys so the GUI still has images to render.
+    states
+        .image
+        .images
+        .set_all(99, [8, 8], s::ImageColor::Gray(64), false)?;
+    states.image.images.remove_index(99, false)?;
+    states
+        .image
+        .images
+        .set_all(100, [8, 8], s::ImageColor::Gray(96), false)?;
+    states.image.images.reset(false)?;
+    states
+        .image
+        .images
+        .set(2, &image, [256, 256], s::ImageFormat::Color, true)?;
+    states
+        .image
+        .images
+        .set_all(7, [256, 256], s::ImageColor::Color(25, 35, 75), true)?;
+    states.image.images.update(
+        7,
+        &image_patch,
+        [96, 96],
+        [64, 64],
+        s::ImageFormat::ColorAlpha,
+        true,
+        false,
+    )?;
+
     server.start()?;
     println!("Rust egui-states server listening on port {PORT}");
 

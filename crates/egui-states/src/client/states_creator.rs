@@ -7,7 +7,7 @@ use crate::State;
 use crate::client::atomics::{Atomic, AtomicStatic};
 use crate::client::data::{Data, DataMulti, UpdateData, UpdateMultiData, private::GetDataType};
 use crate::client::data_take::{DataMultiTake, DataTake, UpdateDataMultiTake, UpdateDataTake};
-use crate::client::image::Image;
+use crate::client::image::{Image, ImageMulti};
 use crate::client::initial_value::InitialValue;
 use crate::client::messages::MessageSender;
 use crate::client::value_map::{MapState, UpdateMap};
@@ -29,6 +29,12 @@ pub(crate) fn hash_id_type(hasher: &mut StableHasher, id: u64, type_id: u32, has
 #[inline]
 pub(crate) fn hash_id(hasher: &mut StableHasher, id: u64) {
     id.hash(hasher);
+}
+
+#[inline]
+pub(crate) fn hash_id_kind(hasher: &mut StableHasher, id: u64, hash_id: u8) {
+    id.hash(hasher);
+    hash_id.hash(hasher);
 }
 
 /// Factory used by [`State::new`](crate::State::new) to register client states.
@@ -106,6 +112,9 @@ pub trait StatesCreator {
     /// Creates a server-controlled egui image texture.
     fn image(&mut self, name: &'static str) -> Image;
 
+    /// Creates server-controlled egui image textures indexed by `u32` keys.
+    fn image_multi(&mut self, name: &'static str) -> ImageMulti;
+
     /// Creates a server-controlled key/value collection.
     fn map<K, V>(&mut self, name: &'static str) -> MapState<K, V>
     where
@@ -152,6 +161,7 @@ pub(crate) struct ValuesList {
     pub(crate) multi_data: NoHashMap<u64, Arc<dyn UpdateMultiData>>,
     pub(crate) data_multi_take: NoHashMap<u64, Arc<dyn UpdateDataMultiTake>>,
     pub(crate) images: NoHashMap<u64, Image>,
+    pub(crate) image_multi: NoHashMap<u64, ImageMulti>,
     pub(crate) maps: NoHashMap<u64, Arc<dyn UpdateMap>>,
     pub(crate) vecs: NoHashMap<u64, Arc<dyn UpdateList>>,
 }
@@ -167,6 +177,7 @@ impl ValuesList {
             multi_data: NoHashMap::default(),
             data_multi_take: NoHashMap::default(),
             images: NoHashMap::default(),
+            image_multi: NoHashMap::default(),
             maps: NoHashMap::default(),
             vecs: NoHashMap::default(),
         }
@@ -181,6 +192,7 @@ impl ValuesList {
         self.multi_data.shrink_to_fit();
         self.data_multi_take.shrink_to_fit();
         self.images.shrink_to_fit();
+        self.image_multi.shrink_to_fit();
         self.maps.shrink_to_fit();
         self.vecs.shrink_to_fit();
     }
@@ -198,6 +210,7 @@ pub(crate) const DATA_HASH_ID: u8 = 8;
 pub(crate) const DATA_MULTI_HASH_ID: u8 = 9;
 pub(crate) const DATA_TAKE_HASH_ID: u8 = 10;
 pub(crate) const DATA_MULTI_TAKE_HASH_ID: u8 = 11;
+pub(crate) const IMAGE_MULTI_HASH_ID: u8 = 12;
 
 pub struct StatesCreatorClient {
     val: ValuesList,
@@ -245,6 +258,7 @@ impl StatesCreator for StatesCreatorClient {
         self.val.multi_data.extend(creator.val.multi_data);
         self.val.data_multi_take.extend(creator.val.data_multi_take);
         self.val.images.extend(creator.val.images);
+        self.val.image_multi.extend(creator.val.image_multi);
         self.val.maps.extend(creator.val.maps);
         self.val.vecs.extend(creator.val.vecs);
 
@@ -366,6 +380,16 @@ impl StatesCreator for StatesCreatorClient {
         let value = Image::new(name, id, self.sender.clone());
 
         self.val.images.insert(id, value.clone());
+        value
+    }
+
+    fn image_multi(&mut self, name: &str) -> ImageMulti {
+        let name = format!("{}.{}", self.parent, name);
+        let id = generate_value_id(&name);
+        hash_id_kind(&mut self.version_hasher, id, IMAGE_MULTI_HASH_ID);
+
+        let value = ImageMulti::new(name, id, self.sender.clone());
+        self.val.image_multi.insert(id, value.clone());
         value
     }
 

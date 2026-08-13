@@ -4,11 +4,11 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error, unbounded_cha
 use crate::client::client::Client;
 use crate::client::data::{DataMessage, DataMultiMessage};
 use crate::client::data_take::{DataMultiTakeMessage, DataTakeMessage};
-use crate::client::image::{ImageMessage, ImageSetMessage};
+use crate::client::image::{ImageMessage, ImageMultiMessage, ImageSetMessage};
 use crate::client::states_creator::ValuesList;
 use crate::collections::{MapHeader, VecHeader};
 use crate::data_transport::{DataHeader, DataMultiTakeHeader, DataTakeHeader, MultiDataHeader};
-use crate::image_transport::{ImageHeader, ImageSetHeader};
+use crate::image_transport::{ImageHeader, ImageMultiHeader, ImageSetHeader};
 use crate::serialization::{
     ClientHeader, FastVec, MAX_MSG_COUNT, MSG_SIZE_THRESHOLD, MessageData, ServerHeader, serialize,
     serialize_to_data,
@@ -134,6 +134,7 @@ pub(crate) enum ServerMessage {
     DataTake(u64, bool, bool, DataTakeMessage),
     DataMulti(u64, bool, DataMultiMessage),
     DataMultiTake(u64, bool, DataMultiTakeMessage),
+    ImageMulti(u64, bool, ImageMultiMessage, Bytes),
     Update(f32),
 }
 
@@ -229,47 +230,8 @@ impl MessagesParser {
             }
             ServerHeader::Update(dt) => ServerMessage::Update(dt),
             ServerHeader::Image(id, header, size) => {
-                let size = size as usize;
-                if self.pointer + size > self.data.len() {
-                    return Err("Incomplete data for Image message");
-                }
-                let data = self.data.slice(self.pointer..self.pointer + size);
-                self.pointer += size;
-
-                match header {
-                    ImageHeader::Set(set_header, image_type) => {
-                        let mut update = false;
-                        let set_message = match set_header {
-                            ImageSetHeader::All(size, upd) => {
-                                update = upd;
-                                ImageSetMessage::All(size)
-                            }
-                            ImageSetHeader::Start(size, lines) => {
-                                ImageSetMessage::Start(size, lines)
-                            }
-                            ImageSetHeader::Batch(lines) => ImageSetMessage::Batch(lines),
-                            ImageSetHeader::End(lines, upd) => {
-                                update = upd;
-                                ImageSetMessage::End(lines)
-                            }
-                        };
-                        ServerMessage::Image(
-                            id,
-                            update,
-                            ImageMessage::Set(set_message, image_type),
-                            data,
-                        )
-                    }
-                    ImageHeader::Update(size, image_type, update) => ServerMessage::Image(
-                        id,
-                        update,
-                        ImageMessage::Update(size, image_type),
-                        data,
-                    ),
-                    ImageHeader::Fill(size, rgba, update) => {
-                        ServerMessage::Image(id, update, ImageMessage::Fill(size, rgba), data)
-                    }
-                }
+                let (message, update, data) = self._process_image(header, size)?;
+                ServerMessage::Image(id, update, message, data)
             }
             ServerHeader::Data(id, data_header) => {
                 let (data_message, update) = self._process_data(data_header)?;
@@ -312,9 +274,66 @@ impl MessagesParser {
                     )
                 }
             },
+            ServerHeader::ImageMulti(id, header) => match header {
+                ImageMultiHeader::Remove(index, update) => ServerMessage::ImageMulti(
+                    id,
+                    update,
+                    ImageMultiMessage::Remove(index),
+                    Bytes::new(),
+                ),
+                ImageMultiHeader::Reset(update) => {
+                    ServerMessage::ImageMulti(id, update, ImageMultiMessage::Reset, Bytes::new())
+                }
+                ImageMultiHeader::Modify(index, header, size) => {
+                    let (message, update, data) = self._process_image(header, size)?;
+                    ServerMessage::ImageMulti(
+                        id,
+                        update,
+                        ImageMultiMessage::Modify(index, message),
+                        data,
+                    )
+                }
+            },
         };
 
         Ok(message_data)
+    }
+
+    fn _process_image(
+        &mut self,
+        header: ImageHeader,
+        size: u32,
+    ) -> Result<(ImageMessage, bool, Bytes), &'static str> {
+        let size = size as usize;
+        if self.pointer + size > self.data.len() {
+            return Err("Incomplete data for Image message");
+        }
+        let data = self.data.slice(self.pointer..self.pointer + size);
+        self.pointer += size;
+
+        let (message, update) = match header {
+            ImageHeader::Set(set_header, image_type) => {
+                let mut update = false;
+                let set_message = match set_header {
+                    ImageSetHeader::All(size, value) => {
+                        update = value;
+                        ImageSetMessage::All(size)
+                    }
+                    ImageSetHeader::Start(size, pixels) => ImageSetMessage::Start(size, pixels),
+                    ImageSetHeader::Batch(pixels) => ImageSetMessage::Batch(pixels),
+                    ImageSetHeader::End(pixels, value) => {
+                        update = value;
+                        ImageSetMessage::End(pixels)
+                    }
+                };
+                (ImageMessage::Set(set_message, image_type), update)
+            }
+            ImageHeader::Update(rect, image_type, update) => {
+                (ImageMessage::Update(rect, image_type), update)
+            }
+            ImageHeader::Fill(size, rgba, update) => (ImageMessage::Fill(size, rgba), update),
+        };
+        Ok((message, update, data))
     }
 
     fn _process_data(
@@ -550,6 +569,32 @@ pub(crate) async fn handle_message(
             }
             update
         }
+        ServerMessage::ImageMulti(id, update, message, data) => {
+            match vals.image_multi.get(&id) {
+                Some(images) => match message {
+                    ImageMultiMessage::Remove(index) => images.remove(index),
+                    ImageMultiMessage::Reset => images.reset(),
+                    ImageMultiMessage::Modify(index, image_message) => match image_message {
+                        ImageMessage::Set(set_message, image_type) => {
+                            images.set_image(index, set_message, image_type, &data)?
+                        }
+                        ImageMessage::Update(rect, image_type) => {
+                            images.update_image(index, rect, image_type, &data)?
+                        }
+                        ImageMessage::Fill(size, rgba) => {
+                            images.fill_image(index, size, rgba, &data)?
+                        }
+                    },
+                },
+                None => {
+                    if message.requires_ack() {
+                        client.send_ack(id);
+                    }
+                    return Err(format!("ImageMulti with id {} not found", id));
+                }
+            }
+            update
+        }
     };
 
     if update {
@@ -639,6 +684,117 @@ mod tests {
             ImageMessage::Set(ImageSetMessage::Start([1, 1], 1), ImageType::ColorAlpha),
             Bytes::new(),
         )));
+    }
+
+    #[test]
+    fn missing_image_multi_acks_only_terminal_modifications() {
+        assert_ack(
+            dispatch_missing(ServerMessage::ImageMulti(
+                83,
+                true,
+                ImageMultiMessage::Modify(7, ImageMessage::Fill([1, 1], [0; 4])),
+                Bytes::new(),
+            )),
+            83,
+        );
+        assert_no_ack(dispatch_missing(ServerMessage::ImageMulti(
+            84,
+            false,
+            ImageMultiMessage::Modify(
+                7,
+                ImageMessage::Set(ImageSetMessage::Start([1, 1], 1), ImageType::ColorAlpha),
+            ),
+            Bytes::new(),
+        )));
+        assert_no_ack(dispatch_missing(ServerMessage::ImageMulti(
+            85,
+            true,
+            ImageMultiMessage::Remove(7),
+            Bytes::new(),
+        )));
+    }
+
+    fn append_server_message(bytes: &mut Vec<u8>, header: &ServerHeader, payload: &[u8]) {
+        bytes.extend(postcard::to_stdvec(header).unwrap());
+        bytes.extend(payload);
+    }
+
+    #[test]
+    fn image_multi_parser_preserves_keys_payloads_and_repaint_flags() {
+        let mut bytes = Vec::new();
+        append_server_message(
+            &mut bytes,
+            &ServerHeader::ImageMulti(
+                90,
+                ImageMultiHeader::Modify(
+                    7,
+                    ImageHeader::Set(ImageSetHeader::All([2, 1], true), ImageType::ColorAlpha),
+                    8,
+                ),
+            ),
+            &[1, 2, 3, 4, 5, 6, 7, 8],
+        );
+        append_server_message(
+            &mut bytes,
+            &ServerHeader::ImageMulti(90, ImageMultiHeader::Remove(2, true)),
+            &[],
+        );
+        append_server_message(
+            &mut bytes,
+            &ServerHeader::ImageMulti(90, ImageMultiHeader::Reset(false)),
+            &[],
+        );
+
+        let (mut parser, first) = MessagesParser::from_bytes(Bytes::from(bytes)).unwrap();
+        match first {
+            ServerMessage::ImageMulti(
+                90,
+                true,
+                ImageMultiMessage::Modify(
+                    7,
+                    ImageMessage::Set(ImageSetMessage::All([2, 1]), ImageType::ColorAlpha),
+                ),
+                data,
+            ) => assert_eq!(data.as_ref(), &[1, 2, 3, 4, 5, 6, 7, 8]),
+            _ => panic!("unexpected ImageMulti set message"),
+        }
+        assert!(matches!(
+            parser.next().unwrap(),
+            Some(ServerMessage::ImageMulti(
+                90,
+                true,
+                ImageMultiMessage::Remove(2),
+                _
+            ))
+        ));
+        assert!(matches!(
+            parser.next().unwrap(),
+            Some(ServerMessage::ImageMulti(
+                90,
+                false,
+                ImageMultiMessage::Reset,
+                _
+            ))
+        ));
+        assert!(parser.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn image_multi_parser_rejects_truncated_payloads() {
+        let header = ServerHeader::ImageMulti(
+            91,
+            ImageMultiHeader::Modify(
+                3,
+                ImageHeader::Update([0, 0, 1, 1], ImageType::GrayAlpha, true),
+                2,
+            ),
+        );
+        let mut bytes = postcard::to_stdvec(&header).unwrap();
+        bytes.push(7);
+        assert!(matches!(
+            MessagesParser::from_bytes(Bytes::from(bytes)),
+            Err("Incomplete data for Image message")
+        ));
     }
 
     #[test]

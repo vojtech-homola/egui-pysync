@@ -38,7 +38,7 @@ pub use client::{
     client::{Client, ConnectionState},
     data::{Data, DataMulti},
     data_take::{DataMultiTake, DataTake},
-    image::Image,
+    image::{Image, ImageMulti},
     initial_value::{InitValue, InitialValue},
     states_creator::StatesCreator,
     value_map::MapState,
@@ -69,4 +69,4 @@ pub use egui_states_macros::{Atomic, AtomicStatic, InitialValue, State};
 pub use serde;
 pub use typed::{ObjectType, Typed};
 
-pub(crate) const PROTOCOL_VERSION: u16 = 5;
+pub(crate) const PROTOCOL_VERSION: u16 = 6;

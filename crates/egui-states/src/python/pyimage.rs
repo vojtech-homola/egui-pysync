@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 
 use crate::image_transport::ImageType;
 use crate::server_core::image_core::ImageData;
+use crate::server_core::image_multi_core::ImageMultiData;
 
 fn check_image_type(shape: &[usize], strides: &[isize]) -> PyResult<ImageType> {
     match shape.len() {
@@ -72,6 +73,34 @@ pub(crate) fn image_data(image: &PyBuffer<u8>) -> PyResult<ImageData> {
         contiguous,
         image_type,
         data,
+    })
+}
+
+pub(crate) fn image_multi_data(image: &PyBuffer<u8>) -> PyResult<ImageMultiData> {
+    let shape = image.shape();
+    let strides = image.strides();
+    let contiguous = image.is_c_contiguous();
+    let image_type = check_image_type(shape, strides)?;
+    let size = [shape[0], shape[1]];
+    if size[0] == 0 || size[1] == 0 {
+        return Err(PyValueError::new_err("Image dimensions cannot be zero"));
+    }
+
+    let stride = if contiguous {
+        0
+    } else {
+        if strides[0] <= 0 {
+            return Err(PyValueError::new_err("Invalid strides"));
+        }
+        strides[0] as usize
+    };
+
+    Ok(ImageMultiData {
+        size,
+        stride,
+        contiguous,
+        image_type,
+        data: image.buf_ptr() as *const u8,
     })
 }
 
