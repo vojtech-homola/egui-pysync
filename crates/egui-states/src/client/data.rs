@@ -1,3 +1,5 @@
+//! Read-only client handles for server-controlled numeric buffers.
+
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
@@ -79,7 +81,11 @@ pub(crate) trait UpdateData: Sync + Send {
 
 /// A client-side, contiguous numeric buffer synchronized from the server.
 ///
-/// Supported element types are the primitive integer and floating-point types.
+/// Supported element types are `u8` through `u64`, `i8` through `i64`, `f32`,
+/// and `f64`. The server may send complete or partial updates and split large
+/// transfers into batches; the client publishes a completed batch as one
+/// buffer. The client API is read-only.
+///
 /// Clone the handle freely; all clones refer to the same buffer.
 pub struct Data<T> {
     name: Arc<String>,
@@ -109,12 +115,18 @@ where
     }
 
     /// Returns a copy of the complete buffer.
+    ///
+    /// This allocates and copies every element. Use [`Self::read`] to inspect a
+    /// large buffer without cloning it.
     pub fn get(&self) -> Vec<T> {
         let inner = self.inner.read();
         inner.clone()
     }
 
     /// Borrows the complete buffer for the duration of `f` without copying it.
+    ///
+    /// The synchronization read lock remains held while `f` runs, so keep the
+    /// closure short to avoid delaying incoming server updates.
     pub fn read<R>(&self, f: impl Fn(&[T]) -> R) -> R {
         let inner = self.inner.read();
         f(&inner)
@@ -369,7 +381,10 @@ pub(crate) trait UpdateMultiData: Sync + Send {
     fn reset(&self);
 }
 
-/// A client-side collection of numeric buffers indexed by `u32` keys.
+/// A read-only client collection of server-controlled numeric buffers.
+///
+/// Each buffer is indexed by a `u32` key and updated independently. Missing
+/// keys return `None`; complete batches become visible atomically.
 pub struct DataMulti<T> {
     name: Arc<String>,
     id: u64,
@@ -397,14 +412,16 @@ where
         }
     }
 
-    #[inline]
     /// Returns a copy of the buffer at `key`, or `None` when it is absent.
+    #[inline]
     pub fn get(&self, key: u32) -> Option<Vec<T>> {
         self.inner.read().get(&key).cloned()
     }
 
-    #[inline]
     /// Borrows the buffer at `key` for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
+    #[inline]
     pub fn read<R>(&self, key: u32, f: impl Fn(Option<&[T]>) -> R) -> R {
         self.inner
             .read()
@@ -413,14 +430,18 @@ where
             .unwrap_or_else(|| f(None))
     }
 
-    #[inline]
     /// Borrows the complete keyed collection for the duration of `f`.
+    ///
+    /// The synchronization read lock remains held while `f` runs.
+    #[inline]
     pub fn read_all<R>(&self, f: impl Fn(&NoHashMap<u32, Vec<T>>) -> R) -> R {
         f(&self.inner.read())
     }
 
-    #[inline]
     /// Calls `f` for every currently stored key and buffer.
+    ///
+    /// The synchronization read lock remains held for the full iteration.
+    #[inline]
     pub fn for_each<F>(&self, f: impl Fn(u32, &[T])) {
         self.inner.read().iter().for_each(|(k, v)| f(*k, &v));
     }

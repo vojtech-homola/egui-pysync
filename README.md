@@ -1,5 +1,8 @@
 # egui-states
 
+[![crates.io](https://img.shields.io/crates/v/egui_states.svg)](https://crates.io/crates/egui_states)
+[![docs.rs](https://docs.rs/egui_states/badge.svg)](https://docs.rs/egui_states)
+
 `egui-states` synchronizes typed application state between an
 [`egui`](https://github.com/emilk/egui) UI and a server. The UI is the Rust
 client; the server can be written in Python or Rust. Both native and WebAssembly
@@ -20,25 +23,41 @@ serialization, and synchronization logic.
    layout hash.
 3. Generate matching Python or Rust server bindings from that same Rust type in
    a build script.
-4. Start the server and connect the egui client. Updates are serialized,
-   type-checked, and applied to the matching state on the other side.
+4. Start the server and connect the egui client. During the handshake, both
+   peers compare the wire-protocol version and any configured application
+   version or token. Updates are then serialized, type-checked, and applied to
+   the matching state on the other side.
 
 The main state types describe both the stored data and its direction:
 
 - `Value<T>` is stored on both peers and can be changed in either direction.
-- `Static<T>` is controlled by the server and read by the client.
+- `Static<T>` is controlled by the server and read by the client. It cannot be
+  written from the client; use `Value<T>` when both sides may write.
+- `ValueAtomic<T>` and `StaticAtomic<T>` provide low-overhead access for small,
+  copyable values.
 - `Signal<T>` is a transient client-to-server event. Signals can coalesce
   pending values or queue every value.
 - `ValueTake<T>` and `DataTake<T>` are one-shot server-to-client transfers.
 - `VecState<T>` and `MapState<K, V>` synchronize collections.
 - `Data<T>` and `DataMulti<T>` efficiently synchronize numeric buffers; Python
   exposes them as NumPy arrays.
+- `DataMultiTake<T>` provides independent one-shot numeric transfers keyed by
+  `u32`.
 - `Image` synchronizes complete images or rectangular updates to an egui
   texture.
 
 State paths follow the Rust field hierarchy. A field named `counter` on the
 root state is registered as `root.counter`; a field inside `controls` becomes
 `root.controls.<field>`.
+
+## Feature flags
+
+| Feature | Default | Enables |
+| --- | --- | --- |
+| `client` | yes | egui client state handles and `ClientBuilder` |
+| `server` | no | Native Rust server API in `egui_states::server` |
+| `python` | no | PyO3 support used to build the Python extension module |
+| `build_scripts` | no | `generate_python` and `generate_rust` binding generators |
 
 ## Minimal Python-server workflow
 
@@ -116,7 +135,32 @@ new value.
 
 To generate a native Rust server instead, use
 `egui_states::build_scripts::generate_rust` and enable the `server` feature in
-the server crate. See [`example/rust`](example/rust) for a complete server.
+the server crate:
+
+```toml
+[dependencies]
+egui_states = { version = "0.15", default-features = false, features = ["server"] }
+
+[build-dependencies]
+egui_states = { version = "0.15", features = ["build_scripts"] }
+ui_state = { path = "../ui-state" }
+```
+
+Generate the module in `build.rs`:
+
+```rust
+use egui_states::build_scripts::generate_rust;
+use ui_state::AppState;
+
+fn main() {
+    println!("cargo:rerun-if-changed=../ui-state/src/");
+    generate_rust::<AppState>("src/states_server").unwrap();
+}
+```
+
+Then declare `mod states_server;`, construct
+`states_server::StatesServer`, and call `start()`. See
+[`example/rust`](example/rust) for a complete server.
 
 ## Custom types
 
@@ -148,3 +192,70 @@ struct Settings {
 
 The `typed` attribute replaces the former
 `#[derive(serde::Serialize, serde::Deserialize, egui_states::Typed)]` syntax.
+
+## Compatibility and connection settings
+
+The handshake can reject a connection for three reasons:
+
+- The internal wire-protocol version is always checked. It changes when the
+  serialized protocol changes incompatibly.
+- An optional application version can be configured with
+  `ClientBuilder::version` and the matching `ServerOptions` or generated
+  Python-server argument.
+- An optional authentication token can be configured in the same places.
+
+The generated state-layout hash is exposed for use as the application version,
+but it is not enforced automatically. To reject mismatched state trees, use the
+client builder's hash and the generated server's `VERSION_HASH`:
+
+```rust
+let builder = ClientBuilder::<AppState>::new();
+let layout_version = builder.get_version_hash();
+let (states, client) = builder.version(layout_version).build(8091);
+```
+
+For Python, construct the generated server with
+`StatesServer(port=8091, version=StatesServer.VERSION_HASH)`. For Rust, set
+`ServerOptions::version` to `Some(StatesServer::VERSION_HASH)` before calling
+`StatesServer::with_options`.
+
+Renaming, reordering, adding, or changing state fields changes the layout hash.
+Generate bindings from the same state type and rebuild both sides after any
+such change. Handshake failures are reported through server diagnostics and the
+client connection state.
+
+## Native and WebAssembly clients
+
+The state API is the same on native and WASM targets. On native targets,
+`ClientBuilder::build` creates a background thread with its own Tokio runtime;
+the application does not need to provide one. On WASM, the synchronization task
+runs on the browser executor.
+
+The included web example uses [Trunk](https://trunkrs.dev/):
+
+```sh
+trunk serve
+```
+
+This serves the UI on port `8090`; run either example server separately on port
+`8091`.
+
+## Troubleshooting
+
+- Call `Image::initialize` on the client before connecting or before the server
+  sends image updates. Updates received without an initialized texture are
+  acknowledged but cannot become visible.
+- Keep Rust `CallbackHandle` values alive. Dropping a handle unregisters its
+  callback.
+- Add an appropriate `cargo:rerun-if-changed` line to generator build scripts,
+  or Cargo may not regenerate bindings after the shared state definition
+  changes.
+- `Value` messages have a serialized size limit. Client `set` rejects an
+  oversized value; an in-place `write` keeps the local edit but cannot send it,
+  leaving the peers out of sync until a later successful update.
+- `ServerOptions::new` binds all IPv4 interfaces by default. Set `ip_addr` when
+  the server should only be reachable through a particular interface.
+
+See [`example/README.md`](example/README.md) for commands to run the complete
+examples and [`docs/architecture.md`](docs/architecture.md) for the protocol
+and synchronization model.

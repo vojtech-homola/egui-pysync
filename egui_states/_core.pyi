@@ -1,3 +1,9 @@
+"""Low-level native extension used by generated Python server bindings.
+
+Applications normally use :mod:`egui_states.structures` and a generated
+``StatesServer`` instead of constructing these objects directly.
+"""
+
 from collections.abc import Buffer
 from enum import IntEnum
 from typing import Any
@@ -5,8 +11,9 @@ from typing import Any
 from egui_states.structures import _CustomStruct
 
 class PyObjectType:
-    """A class representing a type of object in the state server."""
+    """Opaque protocol type descriptor consumed by generated bindings."""
 
+# Primitive protocol type descriptors.
 u8: PyObjectType
 u16: PyObjectType
 u32: PyObjectType
@@ -30,7 +37,7 @@ def map(key_type: PyObjectType, value_type: PyObjectType) -> PyObjectType: ...
 def enu(enum_obj: type[IntEnum]) -> PyObjectType: ...
 
 class StateServerCore:
-    """A class representing the core functionality of the state server."""
+    """Low-level native WebSocket server and synchronized-state registry."""
 
     def __init__(
         self,
@@ -45,7 +52,15 @@ class StateServerCore:
     def is_connected(self) -> bool: ...
     def disconnect_client(self) -> None: ...
     def update(self, duration: float | None = None) -> None: ...
-    def id_to_name(self, value_id: int) -> str: ...
+    def id_to_name(self, value_id: int) -> str:
+        """Return the registered state path for a protocol id.
+
+        Args:
+            value_id (int): Protocol id of the state.
+
+        Returns:
+            str: Fully qualified state path.
+        """
 
     # values ----------------------------------------------------------------------
     def value_set(self, value_id: int, value: object, set_signal: bool, update: bool) -> None: ...
@@ -60,8 +75,26 @@ class StateServerCore:
 
     # signals ---------------------------------------------------------------------
     def signal_set(self, value_id: int, value: object) -> None: ...
-    def signal_register(self, value_id: int, register: bool, with_previous: bool) -> None: ...
-    def signal_get(self, last_id: int | None) -> tuple[int, Any, bool, Any]: ...
+    def signal_register(self, value_id: int, register: bool, with_previous: bool) -> None:
+        """Configure callbacks and previous-value tracking for a state.
+
+        Args:
+            value_id (int): Protocol id of the state.
+            register (bool): Whether the state should emit callback events.
+            with_previous (bool): Whether events should retain the previous
+                value.
+        """
+    def signal_get(self, last_id: int | None) -> tuple[int, Any, bool, Any]:
+        """Wait for and claim the next callback event.
+
+        Args:
+            last_id (int | None): Id of the event claimed by the preceding call,
+                which this call releases, or ``None`` on the first call.
+
+        Returns:
+            tuple[int, Any, bool, Any]: ``(value_id, value, has_previous,
+                previous)`` for the claimed event.
+        """
     def signal_set_to_queue(self, value_id: int) -> None: ...
     def signal_set_to_single(self, value_id: int) -> None: ...
 
@@ -116,7 +149,18 @@ class StateServerCore:
     def data_clear(self, value_id: int, update: bool) -> None: ...
 
     # data take -------------------------------------------------------------------
-    def data_take_set(self, value_id: int, data: Buffer, blocking: bool, update: bool, cache: bool) -> None: ...
+    def data_take_set(self, value_id: int, data: Buffer, blocking: bool, update: bool, cache: bool) -> None:
+        """Send a one-shot buffer to the client.
+
+        Args:
+            value_id (int): Protocol id of the data state.
+            data (Buffer): Buffer-protocol object to send.
+            blocking (bool): Whether to wait until the client consumes the
+                preceding value before sending.
+            update (bool): Whether to request a client repaint.
+            cache (bool): Whether to retain the data for a newly initialized
+                client.
+        """
 
     # data multi --------------------------------------------------------------------
     def data_multi_get(self, value_id: int, index: int) -> bytearray: ...
@@ -137,7 +181,19 @@ class StateServerCore:
         blocking: bool,
         update: bool,
         cache: bool,
-    ) -> None: ...
+    ) -> None:
+        """Send one keyed, one-shot buffer to the client.
+
+        Args:
+            value_id (int): Protocol id of the data state.
+            index (int): Non-negative buffer index.
+            data (Buffer): Buffer-protocol object to send.
+            blocking (bool): Whether to wait until the client consumes the
+                preceding value before sending.
+            update (bool): Whether to request a client repaint.
+            cache (bool): Whether to retain the data for a newly initialized
+                client.
+        """
     def data_multi_take_remove_index(self, value_id: int, index: int, update: bool) -> None: ...
     def data_multi_take_reset(self, value_id: int, update: bool) -> None: ...
 
@@ -153,7 +209,8 @@ class StateServerCore:
     def add_data_take(self, name: str, data_type: int) -> int: ...
     def add_data_multi(self, name: str, data_type: int) -> int: ...
     def add_data_multi_take(self, name: str, data_type: int) -> int: ...
-    def finalize(self) -> None: ...
+    def finalize(self) -> None:
+        """Freeze state registration and prepare the handshake layout."""
 
 __all__ = [
     "u8",

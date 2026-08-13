@@ -3,6 +3,9 @@ name = "egui_states_macros"
 version.workspace = true
 edition.workspace = true
 resolver = "3"
+description = "Procedural macros for egui-states"
+repository = "https://github.com/vojtech-homola/egui-states"
+license = "MIT"
 
 [lib]
 proc-macro = true

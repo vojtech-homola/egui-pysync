@@ -10,19 +10,29 @@ _LOGGING_ID = 0
 
 
 class LogLevel(Enum):
-    """Logging levels."""
+    """Severity of a diagnostic message emitted by the egui client."""
 
+    #: Diagnostic information useful while debugging.
     Debug = 0
+    #: Routine informational output.
     Info = 1
+    #: A potentially problematic condition.
     Warning = 2
+    #: An error reported by the client.
     Error = 3
 
 
 class LoggingSignal:
-    """Logging signal for processing log messages from the state server."""
+    """Dispatch log messages emitted by the connected egui client."""
 
     def __init__(self, signals_manager: SignalsManager, server: StateServerCore) -> None:
-        """Initialize the LoggingSignal."""
+        """Initialize the logging signal.
+
+        Args:
+            signals_manager (SignalsManager): Callback dispatcher to register
+                with.
+            server (StateServerCore): Native server that emits client messages.
+        """
         self._loggers: dict[int, list[Callable[[str], None]]] = {0: [], 1: [], 2: [], 3: []}
         signals_manager.add_callback(_LOGGING_ID, self._callback)
         server.signal_set_to_queue(_LOGGING_ID)
@@ -42,29 +52,30 @@ class LoggingSignal:
             for logger in self._loggers[3]:
                 logger(message[1])
 
-    def add_logger(self, level: LogLevel, logger: Callable[[str], None]):
+    def add_logger(self, level: LogLevel, logger: Callable[[str], None]) -> None:
         """Add logger for a specific level.
 
         Args:
-            level: Logging level to receive.
-            logger: Callback that receives each message.
+            level (LogLevel): Logging level to receive.
+            logger (Callable[[str], None]): Callback that receives each client
+                message at exactly this level.
         """
         self._loggers[level.value].append(logger)
 
-    def remove_logger(self, level: LogLevel, logger: Callable[[str], None]):
+    def remove_logger(self, level: LogLevel, logger: Callable[[str], None]) -> None:
         """Remove logger for a specific level.
 
         Args:
-            level: Logging level from which to remove the callback.
-            logger: Previously registered callback.
+            level (LogLevel): Logging level from which to remove the callback.
+            logger (Callable[[str], None]): Previously registered callback.
         """
         if logger in self._loggers[level.value]:
             self._loggers[level.value].remove(logger)
 
-    def remove_all_loggers(self, level: LogLevel):
+    def remove_all_loggers(self, level: LogLevel) -> None:
         """Remove all loggers for a specific level.
 
         Args:
-            level: Logging level whose callbacks should be removed.
+            level (LogLevel): Logging level whose callbacks should be removed.
         """
         self._loggers[level.value].clear()

@@ -1,3 +1,5 @@
+//! Type-erased initial values used by the Rust and Python binding generators.
+
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
@@ -35,9 +37,9 @@ pub enum InitValue {
     Struct(&'static str, Vec<(&'static str, InitValue)>),
     /// A heterogeneous tuple.
     Tuple(Vec<InitValue>),
-    /// A fixed-size array.
+    /// A fixed-size Rust array (`[T; N]`).
     List(Vec<InitValue>),
-    /// A variable-length vector.
+    /// A growable Rust vector (`Vec<T>`).
     Vec(Vec<InitValue>),
     /// A map stored in canonical key order.
     Map(Vec<(InitValue, InitValue)>),
@@ -80,6 +82,10 @@ impl PartialEq for InitValue {
 ///
 /// Derive this trait for user-defined structs and fieldless enums with
 /// [`InitialValue`](derive@crate::InitialValue).
+/// [`crate::typed`] does not derive it automatically: add the derive when a
+/// custom type is used as the initial value of a [`crate::Value`] or
+/// [`crate::Static`]. Implementations are provided for primitives, `String`,
+/// unit, `Option`, tuples up to arity ten, arrays, vectors, and hash maps.
 ///
 /// # Safety
 ///

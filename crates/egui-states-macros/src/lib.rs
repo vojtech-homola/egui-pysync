@@ -14,8 +14,11 @@ mod states;
 /// Implements `egui_states::Typed` and derives Serde serialization through
 /// the `egui_states` Serde re-export.
 ///
-/// The attribute accepts no arguments and supports the same structs and enums
-/// as the former `Typed` derive macro.
+/// The attribute accepts no arguments. It supports non-generic unit structs or
+/// structs with named fields, and non-generic fieldless enums whose
+/// discriminants fit in `i32`; unions, tuple structs, data-carrying enums, and
+/// generic items are not supported. Every field type must implement
+/// `egui_states::Typed`.
 #[proc_macro_attribute]
 pub fn typed(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = TokenStream2::from(args);
@@ -39,29 +42,41 @@ pub fn typed(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
-#[proc_macro_derive(InitialValue)]
 /// Derives `egui_states::InitialValue` for a struct or fieldless enum.
+///
+/// This supports the same item shapes as [`typed`]. Every struct field must
+/// implement `egui_states::InitialValue`.
+#[proc_macro_derive(InitialValue)]
 pub fn initial_value(input: TokenStream) -> TokenStream {
     objects::impl_initial_value(input)
 }
 
-#[proc_macro_derive(Atomic)]
 /// Derives the client-side `egui_states::Atomic` synchronization traits.
+///
+/// The input must be a non-generic fieldless enum whose discriminants fit in
+/// `i32`; the generated implementation stores the discriminant atomically.
+#[proc_macro_derive(Atomic)]
 pub fn atomic(input: TokenStream) -> TokenStream {
     objects::impl_atomic(input)
 }
 
-#[proc_macro_derive(AtomicStatic)]
 /// Derives `egui_states::AtomicStatic` for a copyable value.
+///
+/// The input must be a non-generic fieldless enum whose discriminants fit in
+/// `i32`; the generated implementation stores the discriminant atomically.
+#[proc_macro_derive(AtomicStatic)]
 pub fn atomic_static(input: TokenStream) -> TokenStream {
     objects::impl_atomic_static(input)
 }
 
-#[proc_macro_derive(State)]
 /// Derives `egui_states::State` for a struct whose fields are state handles.
 ///
 /// Each field is registered under its Rust field name. Nested structs that
-/// also derive `State` become nested state groups.
+/// also derive `State` become nested state groups. The struct must be
+/// non-generic, contain at least one named field, and use path-based field
+/// types. Recognized state-handle names are initialized through the matching
+/// `StatesCreator` method; other field types are treated as nested states.
+#[proc_macro_derive(State)]
 pub fn state(input: TokenStream) -> TokenStream {
     states::impl_state(input)
 }

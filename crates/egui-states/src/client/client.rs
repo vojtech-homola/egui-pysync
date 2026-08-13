@@ -1,3 +1,5 @@
+//! Client construction, connection control, and egui repaint integration.
+
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::Duration;
@@ -130,8 +132,13 @@ pub(crate) fn print_error(error: &str) {
     let _ = error;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 /// Current client connection status.
+///
+/// A connection attempt starts in [`Self::NotConnected`], becomes
+/// [`Self::Connected`] after the handshake, and becomes [`Self::Disconnected`]
+/// when an established connection ends. Calling [`Client::connect`] starts a
+/// new attempt and returns the state to `NotConnected`.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionState {
     /// No connection has been established or a connection attempt is pending.
     NotConnected,
@@ -174,6 +181,10 @@ impl Client {
     ///
     /// This must be called before cloning the client; use
     /// [`ClientBuilder::context`] when possible.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this [`Client`] has already been cloned.
     pub fn set_context(&mut self, context: Context) {
         Arc::get_mut(&mut self.0).unwrap().set_context(context);
     }
@@ -194,7 +205,10 @@ impl Client {
         self.0.connect_signal.wait_clear_async().await;
     }
 
-    /// Starts or retries a connection to the configured server.
+    /// Starts or retries a connection to the configured server asynchronously.
+    ///
+    /// A failed attempt waits for another call to `connect`; it does not block
+    /// the calling UI thread.
     pub fn connect(&self) {
         self.0.connect_signal.set();
     }
@@ -238,7 +252,10 @@ impl<T> ClientBuilder<T>
 where
     T: State,
 {
-    /// Creates a builder targeting `127.0.0.1` with no authentication settings.
+    /// Creates the state tree and a builder targeting `127.0.0.1`.
+    ///
+    /// No egui context, application version, or authentication token is set by
+    /// default. The derived [`State::new`] implementation runs during this call.
     pub fn new() -> Self {
         let (sender, rx) = MessageSender::new();
 
@@ -299,7 +316,11 @@ where
     ///
     /// The task waits until [`Client::connect`] is called before opening a
     /// connection. On native targets it owns a dedicated Tokio runtime; on WASM
-    /// it is spawned on the current browser executor.
+    /// it is spawned on the current browser executor. Keep the returned
+    /// [`Client`] to connect, disconnect, inspect status, and request repaints.
+    ///
+    /// For native debugging, the owner thread is named `Client`; its two Tokio
+    /// workers use the `Client Runtime` prefix.
     pub fn build(self, port: u16) -> (T, Client) {
         let Self {
             creator,
