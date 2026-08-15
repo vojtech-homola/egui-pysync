@@ -19,7 +19,8 @@ struct GeneratedInner {
     Eq,
     Hash,
     egui_states::serde::Serialize,
-    egui_states::Typed
+    egui_states::Typed,
+    custom_macros::Debug
 ))]
 #[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
 struct GeneratedOuter {
@@ -177,7 +178,9 @@ fn requested_rust_derives_are_emitted_for_nested_types() {
     let enums = std::fs::read_to_string(dir.join("enums.rs")).unwrap();
 
     assert!(
-        structs.contains("#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct GeneratedOuter")
+        structs.contains(
+            "#[derive(Clone, Debug, PartialEq, Eq, Hash, custom_macros :: Debug)]\npub struct GeneratedOuter"
+        )
     );
     assert!(
         structs.contains("#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct GeneratedInner")
@@ -205,8 +208,19 @@ impl State for ConflictingDerives {
 }
 
 #[test]
-#[should_panic(expected = "struct Collision declared with inconsistent Rust derives")]
+#[should_panic(
+    expected = "struct Collision declared with inconsistent Rust derives: [\"Debug\"] vs [\"Hash\"]"
+)]
 fn inconsistent_rust_derives_for_one_generated_name_are_rejected() {
     let dir = output_dir("conflicting_rust_derives", 0);
     let _ = generate_rust::<ConflictingDerives>(&dir);
+}
+
+#[test]
+fn inconsistent_rust_derives_do_not_affect_python_generation() {
+    let dir = output_dir("python_conflicting_rust_derives", 0);
+    generate_python::<ConflictingDerives>(&dir).unwrap();
+
+    assert!(dir.join("structs.py").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
 }

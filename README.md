@@ -193,6 +193,8 @@ struct Settings {
 This option affects only generated Rust server types. It accepts arbitrary
 derive paths, but their macros must be available to the server crate. Required
 prerequisite derives and field trait implementations are not inferred.
+Generated enums automatically derive `Clone`, `Copy`, `Debug`, `PartialEq`,
+`Eq`, and `Hash`; generated structs automatically derive only `Clone`.
 
 Add `egui_states::InitialValue` when the type is used by a `Value` or `Static`
 field whose default must be emitted into generated server bindings:

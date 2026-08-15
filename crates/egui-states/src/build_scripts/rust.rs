@@ -366,10 +366,23 @@ fn order_structs(items: &[(String, ObjectType)], order: &mut VecDeque<String>) {
 
 const ENUM_DERIVES: &[&str] = &["Clone", "Copy", "Debug", "PartialEq", "Eq", "Hash"];
 const STRUCT_DERIVES: &[&str] = &["Clone"];
-const TYPED_DERIVES: &[&str] = &["Serialize", "Deserialize", "Typed"];
+const TYPED_DERIVES: &[&str] = &[
+    "Serialize",
+    "Deserialize",
+    "Typed",
+    "serde::Serialize",
+    "serde::Deserialize",
+    "egui_states::serde::Serialize",
+    "egui_states::serde::Deserialize",
+    "egui_states::Typed",
+];
 
-fn derive_name(path: &str) -> &str {
-    path.rsplit("::").next().unwrap_or(path).trim()
+fn normalize_derive_path(path: &str) -> String {
+    path.chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>()
+        .trim_start_matches("::")
+        .to_owned()
 }
 
 fn merged_derives(automatic: &[&str], requested: Option<&[String]>) -> String {
@@ -377,14 +390,17 @@ fn merged_derives(automatic: &[&str], requested: Option<&[String]>) -> String {
         .iter()
         .map(|derive| (*derive).to_owned())
         .collect::<Vec<_>>();
+    let mut normalized_derives = derives.clone();
 
     for requested in requested.into_iter().flatten() {
-        let name = derive_name(requested);
-        if automatic.contains(&name) || TYPED_DERIVES.contains(&name) {
+        let normalized = normalize_derive_path(requested);
+        if automatic.contains(&normalized.as_str()) || TYPED_DERIVES.contains(&normalized.as_str())
+        {
             continue;
         }
-        if !derives.contains(requested) {
+        if !normalized_derives.contains(&normalized) {
             derives.push(requested.clone());
+            normalized_derives.push(normalized);
         }
     }
 
@@ -393,6 +409,7 @@ fn merged_derives(automatic: &[&str], requested: Option<&[String]>) -> String {
 
 fn render_rust<S: State>() -> Result<(String, String, String), String> {
     let (states, version_hash, rust_derives) = scripts::parse_states::<S>();
+    rust_derives.validate();
     scripts::validate_states(&states);
 
     let mut values_list = Vec::new();

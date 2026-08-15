@@ -25,22 +25,28 @@ use crate::typed::{ObjectType, RustDerive, Typed};
 pub(crate) struct RustDerives {
     enums: BTreeMap<String, Vec<String>>,
     structs: BTreeMap<String, Vec<String>>,
+    conflicts: Vec<String>,
 }
 
 impl RustDerives {
     fn insert(&mut self, derive: RustDerive) {
         match derive {
             RustDerive::Enum(name, derives) => {
-                Self::insert_type(&mut self.enums, "enum", name, derives)
+                Self::insert_type(&mut self.enums, &mut self.conflicts, "enum", name, derives)
             }
-            RustDerive::Struct(name, derives) => {
-                Self::insert_type(&mut self.structs, "struct", name, derives)
-            }
+            RustDerive::Struct(name, derives) => Self::insert_type(
+                &mut self.structs,
+                &mut self.conflicts,
+                "struct",
+                name,
+                derives,
+            ),
         }
     }
 
     fn insert_type(
         types: &mut BTreeMap<String, Vec<String>>,
+        conflicts: &mut Vec<String>,
         kind: &str,
         name: &str,
         derives: &[&str],
@@ -54,19 +60,30 @@ impl RustDerives {
                 entry.insert(derives);
             }
             Entry::Occupied(entry) if entry.get() != &derives => {
-                panic!("{kind} {name} declared with inconsistent Rust derives");
+                conflicts.push(format!(
+                    "{kind} {name} declared with inconsistent Rust derives: {:?} vs {:?}",
+                    entry.get(),
+                    derives
+                ));
             }
             Entry::Occupied(_) => {}
         }
     }
 
     fn merge(&mut self, other: Self) {
-        Self::merge_types(&mut self.enums, "enum", other.enums);
-        Self::merge_types(&mut self.structs, "struct", other.structs);
+        let Self {
+            enums,
+            structs,
+            mut conflicts,
+        } = other;
+        self.conflicts.append(&mut conflicts);
+        Self::merge_types(&mut self.enums, &mut self.conflicts, "enum", enums);
+        Self::merge_types(&mut self.structs, &mut self.conflicts, "struct", structs);
     }
 
     fn merge_types(
         types: &mut BTreeMap<String, Vec<String>>,
+        conflicts: &mut Vec<String>,
         kind: &str,
         other: BTreeMap<String, Vec<String>>,
     ) {
@@ -76,10 +93,20 @@ impl RustDerives {
                     entry.insert(derives);
                 }
                 Entry::Occupied(entry) if entry.get() != &derives => {
-                    panic!("{kind} {name} declared with inconsistent Rust derives");
+                    conflicts.push(format!(
+                        "{kind} {name} declared with inconsistent Rust derives: {:?} vs {:?}",
+                        entry.get(),
+                        derives
+                    ));
                 }
                 Entry::Occupied(_) => {}
             }
+        }
+    }
+
+    pub(crate) fn validate(&self) {
+        if let Some(conflict) = self.conflicts.first() {
+            panic!("{conflict}");
         }
     }
 
