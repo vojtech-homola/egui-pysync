@@ -862,16 +862,26 @@ impl StateServerCore {
         })
     }
 
-    fn image_multi_remove_index(&self, value_id: u64, index: u32, update: bool) -> PyResult<()> {
-        self.inner_image_multi(value_id)?
-            .remove_index(index, update)
-            .map_err(PyValueError::new_err)
+    fn image_multi_remove_index(
+        &self,
+        py: Python,
+        value_id: u64,
+        index: u32,
+        update: bool,
+    ) -> PyResult<()> {
+        py.detach(|| {
+            self.inner_image_multi(value_id)?
+                .remove_index(index, update)
+                .map_err(PyValueError::new_err)
+        })
     }
 
-    fn image_multi_reset(&self, value_id: u64, update: bool) -> PyResult<()> {
-        self.inner_image_multi(value_id)?
-            .reset_images(update)
-            .map_err(PyValueError::new_err)
+    fn image_multi_reset(&self, py: Python, value_id: u64, update: bool) -> PyResult<()> {
+        py.detach(|| {
+            self.inner_image_multi(value_id)?
+                .reset_images(update)
+                .map_err(PyValueError::new_err)
+        })
     }
 
     fn image_multi_len(&self, value_id: u64) -> PyResult<usize> {

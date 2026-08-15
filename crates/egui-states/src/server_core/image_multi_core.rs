@@ -11,7 +11,8 @@ use crate::image_transport::{
 };
 use crate::serialization::{FastVec, MSG_SIZE_THRESHOLD};
 use crate::server_core::image_core_common::{
-    checked_fill_size, write_all_new, write_all_new_stride, write_rectangle,
+    checked_fill_size, checked_image_rect, checked_image_size, write_all_new, write_all_new_stride,
+    write_rectangle,
 };
 use crate::server_core::sender::MessageSender;
 use crate::server_core::server::{Acknowledge, SyncTrait};
@@ -117,7 +118,11 @@ impl ImageMultiTransfer {
         if !self.is_connected() {
             return Ok(());
         }
-        if self.state.lock().sync_generation != generation {
+
+        // Keep reset from changing the generation between this check and the
+        // enqueue, which could otherwise leak stale work into a new connection.
+        let state = self.state.lock();
+        if state.sync_generation != generation {
             return Ok(());
         }
         self.event.clear();
@@ -191,12 +196,16 @@ impl ImageMultiTransfer {
 
     fn send_control(&self, _lock: MutexGuard<'_, ()>, message: FastVec<32>) {
         let generation = self.state.lock().sync_generation;
-        if !self.event.is_set() {
-            self.event.wait_clear();
+        self.event.wait();
+        if !self.is_connected() {
+            return;
         }
-        if self.is_connected() && self.state.lock().sync_generation == generation {
-            self.sender.send(message);
+
+        let state = self.state.lock();
+        if state.sync_generation != generation {
+            return;
         }
+        self.sender.send(message);
     }
 
     fn begin_sync(&self, messages: Vec<(FastVec<32>, bool)>, ack_count: usize) {
@@ -325,17 +334,13 @@ impl ImageMulti {
         image: ImageMultiData,
         update: bool,
     ) -> Result<(), String> {
+        let (_, rgba_size) = checked_fill_size(image.size)?;
         let to_send = if self.transfer.is_connected() {
             Some(pack_set_data(self.transfer.id, index, &image, update)?)
         } else {
             None
         };
-        let pixels = image.size[0]
-            .checked_mul(image.size[1])
-            .ok_or_else(|| "Image dimensions overflow".to_string())?;
-        let rgba_size = pixels
-            .checked_mul(4)
-            .ok_or_else(|| "Image dimensions overflow".to_string())?;
+        let pixels = rgba_size / 4;
         let lock = self.transfer.lock.lock();
         let mut inner = self.inner.write();
         let stored = inner.images.entry(index).or_insert_with(|| StoredImage {
@@ -436,6 +441,8 @@ impl ImageMulti {
         update: bool,
         force: bool,
     ) -> Result<(), String> {
+        checked_fill_size(image.size)?;
+        checked_image_rect(origin, image.size)?;
         let to_send = if self.transfer.is_connected() {
             Some(pack_update_data(
                 self.transfer.id,
@@ -586,7 +593,7 @@ fn pack_set_data(
     image: &ImageMultiData,
     update: bool,
 ) -> Result<Vec<(FastVec<32>, bool)>, String> {
-    let size = [image.size[1] as u32, image.size[0] as u32]; // reverse for egui
+    let size = checked_image_size(image.size)?;
     let bytes_line_size = image.size[1] * image.image_type.bytes_per_pixel();
     let bytes_size = image.size[0] * bytes_line_size;
 
@@ -678,6 +685,7 @@ fn pack_update_data(
     image: &ImageMultiData,
     update: bool,
 ) -> Result<VecDeque<(FastVec<32>, bool)>, String> {
+    let wire_rect = checked_image_rect(origin, image.size)?;
     let bytes_line_size = image.size[1] * image.image_type.bytes_per_pixel();
     let bytes_size = image.size[0] * bytes_line_size;
 
@@ -698,16 +706,10 @@ fn pack_update_data(
     };
 
     if bytes_size <= MSG_SIZE_THRESHOLD {
-        let rect = [
-            origin[1] as u32,
-            origin[0] as u32,
-            image.size[1] as u32,
-            image.size[0] as u32,
-        ];
         let mut message = serialize_image_multi_header(
             id,
             index,
-            ImageHeader::Update(rect, image.image_type, update),
+            ImageHeader::Update(wire_rect, image.image_type, update),
             bytes_size as u32,
         )
         .map_err(|_| format!("Failed to serialize update header for image {}", id))?;
@@ -727,11 +729,14 @@ fn pack_update_data(
             let lines = remaining_lines.min(chunk_lines);
             let data_size = lines * bytes_line_size;
             let is_last = lines == remaining_lines;
+            let wire_processed_lines = u32::try_from(processed_lines)
+                .map_err(|_| "Image coordinates exceed protocol limits".to_string())?;
             let rect = [
-                origin[1] as u32,
-                (origin[0] + processed_lines) as u32,
-                image.size[1] as u32,
-                lines as u32,
+                wire_rect[0],
+                wire_rect[1] + wire_processed_lines,
+                wire_rect[2],
+                u32::try_from(lines)
+                    .map_err(|_| "Image dimensions exceed protocol limits".to_string())?,
             ];
             let mut message = serialize_image_multi_header(
                 id,
@@ -757,6 +762,7 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use super::*;
+    #[cfg(feature = "client")]
     use crate::image_transport::{ImageHeader, ImageSetHeader};
     #[cfg(feature = "client")]
     use crate::serialization::ServerHeader;
@@ -798,6 +804,14 @@ mod tests {
         assert_eq!(message.to_bytes().as_ref(), &[expected]);
     }
 
+    fn wait_until(mut predicate: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !predicate() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
     #[test]
     fn same_sized_replacements_reuse_the_rgba_allocation() {
         let (images, _, _) = new_image_multi(false);
@@ -817,6 +831,57 @@ mod tests {
             .set_all_image(4, [1, 2], [9, 8, 7, 6], false)
             .unwrap();
         assert_eq!(images.inner.read().images[&4].data.as_ptr(), allocation);
+    }
+
+    #[test]
+    fn invalid_dimensions_do_not_mutate_or_send() {
+        let (images, _, mut receiver) = new_image_multi(true);
+        let empty = [];
+        assert!(
+            images
+                .set_image(1, image_data(&empty, [0, 1], ImageType::Gray), false)
+                .is_err()
+        );
+        assert!(!images.contains(1));
+        assert_no_message(&mut receiver);
+
+        #[cfg(target_pointer_width = "64")]
+        {
+            let too_large = u32::MAX as usize + 1;
+            assert!(
+                images
+                    .set_image(
+                        1,
+                        image_data(&empty, [1, too_large], ImageType::Gray),
+                        false,
+                    )
+                    .unwrap_err()
+                    .contains("protocol limits")
+            );
+            assert!(!images.contains(1));
+            assert_no_message(&mut receiver);
+        }
+
+        images
+            .set_all_image(1, [1, 1], [1, 2, 3, 4], false)
+            .unwrap();
+        let before = images.get_image(1, |image| image.unwrap().0.clone());
+        assert!(
+            images
+                .update_image(
+                    1,
+                    &[0, 0],
+                    image_data(&empty, [1, 0], ImageType::Gray),
+                    false,
+                    false,
+                )
+                .is_err()
+        );
+        assert_eq!(
+            images.get_image(1, |image| image.unwrap().0.clone()),
+            before
+        );
+        assert_no_message(&mut receiver);
     }
 
     #[test]
@@ -998,6 +1063,139 @@ mod tests {
         assert_marker(&mut receiver, 3);
         images.acknowledge();
         assert!(images.transfer.is_idle());
+    }
+
+    #[test]
+    fn control_waits_for_every_buffered_update_chunk_without_consuming_idle() {
+        let (images, _, mut receiver) = new_image_multi(true);
+        let mut update = VecDeque::from([(marker_message(1), true), (marker_message(2), false)]);
+        let lock = images.transfer.lock.lock();
+        images
+            .transfer
+            .send_or_buffer_update(lock, 7, [0, 0, 1, 2], &mut update, false)
+            .unwrap();
+        assert_marker(&mut receiver, 1);
+
+        let waiting_images = images.clone();
+        let (started_sender, started_receiver) = std::sync::mpsc::channel();
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
+        let waiting_control = std::thread::spawn(move || {
+            let lock = waiting_images.transfer.lock.lock();
+            started_sender.send(()).unwrap();
+            waiting_images
+                .transfer
+                .send_control(lock, marker_message(3));
+            done_sender.send(()).unwrap();
+        });
+
+        started_receiver.recv().unwrap();
+        assert!(matches!(
+            done_receiver.recv_timeout(std::time::Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+
+        images.acknowledge();
+        assert_marker(&mut receiver, 2);
+        assert!(matches!(
+            done_receiver.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        images.acknowledge();
+        done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        waiting_control.join().unwrap();
+        assert_marker(&mut receiver, 3);
+        assert!(images.transfer.is_idle());
+
+        let lock = images.transfer.lock.lock();
+        images
+            .transfer
+            .send_or_buffer_set(lock, 9, vec![(marker_message(4), false)])
+            .unwrap();
+        assert_marker(&mut receiver, 4);
+        images.acknowledge();
+        assert!(images.transfer.is_idle());
+    }
+
+    #[test]
+    fn remove_and_reset_controls_leave_transfer_ready_for_later_sets() {
+        let (images, connected, mut receiver) = new_image_multi(false);
+        images
+            .set_all_image(1, [1, 1], [1, 1, 1, 255], false)
+            .unwrap();
+        connected.store(true, Ordering::Release);
+        images.sync().unwrap();
+        assert_message(&mut receiver); // reset
+        assert_message(&mut receiver); // initial image
+        images.acknowledge();
+
+        images
+            .set_all_image(1, [1, 1], [2, 2, 2, 255], false)
+            .unwrap();
+        assert_message(&mut receiver);
+        let removing_images = images.clone();
+        let remove = std::thread::spawn(move || removing_images.remove_index(1, false));
+        wait_until(|| !images.contains(1));
+        assert_no_message(&mut receiver);
+        images.acknowledge();
+        remove.join().unwrap().unwrap();
+        assert_message(&mut receiver); // remove
+        assert!(images.transfer.is_idle());
+
+        images
+            .set_all_image(2, [1, 1], [3, 3, 3, 255], false)
+            .unwrap();
+        assert_message(&mut receiver);
+        let resetting_images = images.clone();
+        let reset = std::thread::spawn(move || resetting_images.reset_images(false));
+        wait_until(|| images.len() == 0);
+        assert_no_message(&mut receiver);
+        images.acknowledge();
+        reset.join().unwrap().unwrap();
+        assert_message(&mut receiver); // reset
+        assert!(images.transfer.is_idle());
+
+        images
+            .set_all_image(3, [1, 1], [4, 4, 4, 255], false)
+            .unwrap();
+        assert_message(&mut receiver);
+        images.acknowledge();
+        assert!(images.transfer.is_idle());
+    }
+
+    #[test]
+    fn reset_discards_a_set_waiter_from_the_previous_connection() {
+        let (images, connected, mut receiver) = new_image_multi(false);
+        images
+            .set_all_image(1, [1, 1], [1, 1, 1, 255], false)
+            .unwrap();
+        connected.store(true, Ordering::Release);
+        images.sync().unwrap();
+        assert_message(&mut receiver); // reset
+        assert_message(&mut receiver); // initial image
+
+        images
+            .set_all_image(1, [1, 1], [2, 2, 2, 255], false)
+            .unwrap();
+        assert_no_message(&mut receiver);
+
+        let waiting_images = images.clone();
+        let waiter = std::thread::spawn(move || {
+            waiting_images.set_all_image(1, [1, 1], [3, 3, 3, 255], false)
+        });
+        wait_until(|| images.get_image(1, |image| image.unwrap().0.as_slice() == [3, 3, 3, 255]));
+
+        connected.store(false, Ordering::Release);
+        images.reset();
+        connected.store(true, Ordering::Release);
+        images.sync().unwrap();
+        waiter.join().unwrap().unwrap();
+
+        assert_message(&mut receiver); // reconnect reset
+        assert_message(&mut receiver); // latest complete image
+        assert_no_message(&mut receiver);
     }
 
     #[test]

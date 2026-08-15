@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::image_transport::ImageType;
 use crate::server_core::image_core::{Image as CoreImage, ImageData};
+use crate::server_core::image_core_common::checked_fill_size;
 use crate::server_core::image_multi_core::{ImageMulti as CoreImageMulti, ImageMultiData};
 
 use super::state_server::StateServer;
@@ -310,6 +311,7 @@ impl ImageMulti {
 }
 
 fn check_image_multi_data(data: &[u8], size: [usize; 2], format: ImageFormat) -> Result<usize> {
+    checked_fill_size(size).map_err(ServerError::new)?;
     let stride = size[1]
         .checked_mul(format.bytes_per_pixel())
         .ok_or_else(|| ServerError::new("image dimensions overflow"))?;
@@ -401,6 +403,24 @@ mod tests {
         assert_eq!(images.get(7), None);
         assert!(
             images
+                .set(9, &[], [0, 1], ImageFormat::Gray, false)
+                .is_err()
+        );
+        assert!(!images.contains(9));
+        #[cfg(target_pointer_width = "64")]
+        {
+            let too_large = u32::MAX as usize + 1;
+            assert!(
+                images
+                    .set(9, &[], [1, too_large], ImageFormat::Gray, false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("protocol limits")
+            );
+            assert!(!images.contains(9));
+        }
+        assert!(
+            images
                 .update(7, &[1], [0, 0], [1, 1], ImageFormat::Gray, false, false,)
                 .is_err()
         );
@@ -441,6 +461,12 @@ mod tests {
         assert_eq!(images.get(7).unwrap().0, vec![10, 20, 30, 255, 9, 9, 9, 10]);
 
         let before = images.get(7).unwrap();
+        assert!(
+            images
+                .update(7, &[], [0, 0], [0, 1], ImageFormat::Gray, false, false,)
+                .is_err()
+        );
+        assert_eq!(images.get(7).unwrap(), before);
         assert!(
             images
                 .update(7, &[1], [1, 2], [1, 1], ImageFormat::Gray, false, false,)

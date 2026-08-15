@@ -238,6 +238,13 @@ def test_image_multi_sparse_collection(server_bundle: tuple[StatesServer, State,
     assert 9 not in images
     with pytest.raises(OverflowError):
         images[-1].set_all((1, 1), 0)
+    with pytest.raises(ValueError, match="dimensions cannot be zero"):
+        images[9].set(np.zeros((0, 1), dtype=np.uint8))
+    with pytest.raises(ValueError, match="dimensions cannot be zero"):
+        images[9].set_all((1, 0), 0)
+    with pytest.raises(ValueError, match="dimensions cannot be zero"):
+        images[7].update(np.zeros((1, 0), dtype=np.uint8), (0, 0))
+    assert 9 not in images
 
     images.remove_index(100)
     assert len(images) == 2
