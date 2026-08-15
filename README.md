@@ -178,6 +178,22 @@ struct Settings {
 }
 ```
 
+Use `rust_derive(...)` to add derives to the corresponding custom type in
+generated Rust server bindings:
+
+```rust
+#[egui_states::typed(rust_derive(Debug, PartialEq, Eq))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Settings {
+    enabled: bool,
+    label: String,
+}
+```
+
+This option affects only generated Rust server types. It accepts arbitrary
+derive paths, but their macros must be available to the server crate. Required
+prerequisite derives and field trait implementations are not inferred.
+
 Add `egui_states::InitialValue` when the type is used by a `Value` or `Static`
 field whose default must be emitted into generated server bindings:
 

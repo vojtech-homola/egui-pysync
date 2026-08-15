@@ -6,6 +6,50 @@ use std::path::PathBuf;
 use egui_states::build_scripts::{generate_python, generate_rust};
 use egui_states::{State, StatesCreator, Value};
 
+#[egui_states::typed(rust_derive(Debug, PartialEq, Eq, Hash))]
+#[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
+struct GeneratedInner {
+    enabled: bool,
+}
+
+#[egui_states::typed(rust_derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    egui_states::serde::Serialize,
+    egui_states::Typed
+))]
+#[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
+struct GeneratedOuter {
+    inner: Option<GeneratedInner>,
+}
+
+#[egui_states::typed(rust_derive(Debug, PartialOrd, Ord))]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, egui_states::InitialValue)]
+enum GeneratedEnum {
+    #[default]
+    First,
+    Second,
+}
+
+mod first_collision {
+    #[egui_states::typed(rust_derive(Debug))]
+    #[derive(Clone, Default, egui_states::InitialValue)]
+    pub(super) struct Collision {
+        pub(super) value: bool,
+    }
+}
+
+mod second_collision {
+    #[egui_states::typed(rust_derive(Hash))]
+    #[derive(Clone, Default, egui_states::InitialValue)]
+    pub(super) struct Collision {
+        pub(super) value: bool,
+    }
+}
+
 /// A state class holding map-valued states, used twice by [`Root`].
 struct Leaf;
 
@@ -19,7 +63,11 @@ impl State for Leaf {
         );
         let _: Value<HashMap<String, u8>> = c.value(
             "labels",
-            HashMap::from([("b".to_string(), 1), ("a".to_string(), 2), ("c".to_string(), 3)]),
+            HashMap::from([
+                ("b".to_string(), 1),
+                ("a".to_string(), 2),
+                ("c".to_string(), 3),
+            ]),
         );
         Self
     }
@@ -33,6 +81,13 @@ impl State for Root {
     fn new(c: &mut impl StatesCreator) -> Self {
         let _: Leaf = c.substate("first");
         let _: Leaf = c.substate("second");
+        let _: Value<Option<GeneratedOuter>> = c.value(
+            "custom",
+            Some(GeneratedOuter {
+                inner: Some(GeneratedInner { enabled: true }),
+            }),
+        );
+        let _: Value<GeneratedEnum> = c.value("custom_enum", GeneratedEnum::First);
         Self
     }
 }
@@ -112,4 +167,46 @@ fn map_initial_values_are_ordered_by_key() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn requested_rust_derives_are_emitted_for_nested_types() {
+    let dir = output_dir("rust_derives", 0);
+    generate_rust::<Root>(&dir).unwrap();
+    let structs = std::fs::read_to_string(dir.join("structs.rs")).unwrap();
+    let enums = std::fs::read_to_string(dir.join("enums.rs")).unwrap();
+
+    assert!(
+        structs.contains("#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct GeneratedOuter")
+    );
+    assert!(
+        structs.contains("#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct GeneratedInner")
+    );
+    assert_eq!(structs.matches("Clone, Clone").count(), 0);
+    assert!(!structs.contains("Serialize"));
+    assert!(!structs.contains("Typed)]"));
+    assert!(enums.contains(
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]\npub enum GeneratedEnum"
+    ));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+struct ConflictingDerives;
+
+impl State for ConflictingDerives {
+    const NAME: &'static str = "ConflictingDerives";
+
+    fn new(c: &mut impl StatesCreator) -> Self {
+        let _: Value<first_collision::Collision> = c.value("first", Default::default());
+        let _: Value<second_collision::Collision> = c.value("second", Default::default());
+        Self
+    }
+}
+
+#[test]
+#[should_panic(expected = "struct Collision declared with inconsistent Rust derives")]
+fn inconsistent_rust_derives_for_one_generated_name_are_rejected() {
+    let dir = output_dir("conflicting_rust_derives", 0);
+    let _ = generate_rust::<ConflictingDerives>(&dir);
 }

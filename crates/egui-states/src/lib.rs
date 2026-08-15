@@ -114,7 +114,7 @@ pub use egui_states_macros::{Atomic, AtomicStatic, InitialValue, State};
 /// Generated derives refer to this module, so applications using [`typed`] do
 /// not need to add a separate direct Serde dependency.
 pub use serde;
-pub use typed::{ObjectType, Typed};
+pub use typed::{ObjectType, RustDerive, Typed};
 
 // Wire protocol version advertised during the WebSocket handshake. A mismatch
 // rejects the connection; bump this only for an incompatible message change.

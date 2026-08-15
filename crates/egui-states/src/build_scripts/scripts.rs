@@ -3,17 +3,18 @@ use std::fs;
 use std::path::Path;
 
 use crate::State;
-use crate::build_scripts::states_creator_build::{StateType, StatesCreatorBuild};
+use crate::build_scripts::states_creator_build::{RustDerives, StateType, StatesCreatorBuild};
 use crate::typed::ObjectType;
 
-pub(crate) fn parse_states<S: State>() -> (StateType, u64) {
+pub(crate) fn parse_states<S: State>() -> (StateType, u64, RustDerives) {
     let mut creator = StatesCreatorBuild::new("root");
     let _ = S::new(&mut creator);
     let version_hash = creator.get_version_hash();
-    let states = creator.get_states();
+    let (states, rust_derives) = creator.into_parts();
     (
         StateType::SubState("root".to_string(), S::NAME, states),
         version_hash,
+        rust_derives,
     )
 }
 

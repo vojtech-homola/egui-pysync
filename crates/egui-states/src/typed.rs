@@ -131,6 +131,19 @@ impl ObjectType {
     }
 }
 
+/// Rust derives requested for a custom type emitted by the Rust server generator.
+///
+/// This is public because [`crate::typed`] emits it in downstream crates. It is
+/// build metadata only and does not contribute to protocol compatibility hashes.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RustDerive {
+    /// Additional derives for a generated fieldless enum.
+    Enum(&'static str, &'static [&'static str]),
+    /// Additional derives for a generated struct.
+    Struct(&'static str, &'static [&'static str]),
+}
+
 /// Describes how a Rust type is represented by the synchronization protocol.
 ///
 /// Use [`egui_states::typed`](crate::typed) for user-defined structs and enums
@@ -147,6 +160,13 @@ impl ObjectType {
 pub unsafe trait Typed {
     /// Returns the protocol type description for `Self`.
     fn get_type() -> ObjectType;
+
+    /// Returns Rust server code-generation metadata for custom types contained
+    /// by `Self`.
+    #[doc(hidden)]
+    fn rust_derives() -> Vec<RustDerive> {
+        Vec::new()
+    }
 }
 
 macro_rules! impl_typed_base {
@@ -198,6 +218,10 @@ where
     fn get_type() -> ObjectType {
         ObjectType::Option(Box::new(T::get_type()))
     }
+
+    fn rust_derives() -> Vec<RustDerive> {
+        T::rust_derives()
+    }
 }
 
 macro_rules! impl_typed_tuple {
@@ -210,6 +234,12 @@ macro_rules! impl_typed_tuple {
                 #[inline]
                 fn get_type() -> ObjectType {
                     ObjectType::Tuple(vec![$($T::get_type()),*])
+                }
+
+                fn rust_derives() -> Vec<RustDerive> {
+                    let mut derives = Vec::new();
+                    $(derives.extend($T::rust_derives());)*
+                    derives
                 }
             }
         )*
@@ -237,6 +267,10 @@ where
     fn get_type() -> ObjectType {
         ObjectType::List(N as u32, Box::new(T::get_type()))
     }
+
+    fn rust_derives() -> Vec<RustDerive> {
+        T::rust_derives()
+    }
 }
 
 unsafe impl<T> Typed for Vec<T>
@@ -246,6 +280,10 @@ where
     #[inline]
     fn get_type() -> ObjectType {
         ObjectType::Vec(Box::new(T::get_type()))
+    }
+
+    fn rust_derives() -> Vec<RustDerive> {
+        T::rust_derives()
     }
 }
 
@@ -257,5 +295,11 @@ where
     #[inline]
     fn get_type() -> ObjectType {
         ObjectType::Map(Box::new(K::get_type()), Box::new(V::get_type()))
+    }
+
+    fn rust_derives() -> Vec<RustDerive> {
+        let mut derives = K::rust_derives();
+        derives.extend(V::rust_derives());
+        derives
     }
 }
