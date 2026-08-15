@@ -136,6 +136,7 @@ impl ObjectType {
 /// This is public because [`crate::typed`] emits it in downstream crates. It is
 /// build metadata only and does not contribute to protocol compatibility hashes.
 #[doc(hidden)]
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RustDerive {
     /// Additional derives for a generated fieldless enum.
