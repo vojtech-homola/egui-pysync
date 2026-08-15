@@ -25,7 +25,7 @@ pub(super) enum TestEnum2 {
     Z,
 }
 
-#[egui_states::typed]
+#[egui_states::typed(rust_derive(Debug, PartialEq))]
 #[derive(Clone, Default, PartialEq, egui_states::InitialValue)]
 pub(super) struct TestStruct {
     pub x: f32,
@@ -33,7 +33,7 @@ pub(super) struct TestStruct {
     pub label: String,
 }
 
-#[egui_states::typed]
+#[egui_states::typed(rust_derive(Debug, PartialEq, Eq, Hash))]
 #[derive(Clone, Default, PartialEq, Eq, egui_states::InitialValue)]
 pub(super) struct TestStruct2 {
     pub enabled: bool,

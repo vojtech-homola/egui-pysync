@@ -14,23 +14,26 @@ mod states;
 /// Implements `egui_states::Typed` and derives Serde serialization through
 /// the `egui_states` Serde re-export.
 ///
-/// The attribute accepts no arguments. It supports non-generic unit structs or
-/// structs with named fields, and non-generic fieldless enums whose
-/// discriminants fit in `i32`; unions, tuple structs, data-carrying enums, and
-/// generic items are not supported. Every field type must implement
-/// `egui_states::Typed`.
+/// Use `rust_derive(...)` to add derives to the corresponding generated Rust
+/// server type. Derive paths are emitted as written and must be available in the
+/// crate compiling the generated bindings. They are not added to the source
+/// type, and prerequisite derives are not inferred.
+///
+/// The attribute supports non-generic unit structs or structs with named
+/// fields, and non-generic fieldless enums whose discriminants fit in `i32`;
+/// unions, tuple structs, data-carrying enums, and generic items are not
+/// supported. Every field type must implement `egui_states::Typed`.
 #[proc_macro_attribute]
 pub fn typed(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = TokenStream2::from(args);
-    if !args.is_empty() {
-        return syn::Error::new_spanned(args, "`typed` does not accept arguments")
-            .into_compile_error()
-            .into();
-    }
+    let rust_derives = match parse_typed_args(args) {
+        Ok(rust_derives) => rust_derives,
+        Err(error) => return error.into_compile_error().into(),
+    };
 
     let item_input = input.clone();
     let mut item = parse_macro_input!(item_input as DeriveInput);
-    let typed_impl = TokenStream2::from(objects::impl_typed(input));
+    let typed_impl = TokenStream2::from(objects::impl_typed(input, &rust_derives));
 
     match add_serde_attributes(&mut item) {
         Ok(()) => quote! {
@@ -40,6 +43,48 @@ pub fn typed(args: TokenStream, input: TokenStream) -> TokenStream {
         .into(),
         Err(error) => error.into_compile_error().into(),
     }
+}
+
+fn parse_typed_args(args: TokenStream2) -> syn::Result<Vec<Path>> {
+    if args.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
+    let metas = parser.parse2(args)?;
+    let mut rust_derives = None;
+
+    for meta in metas {
+        let Meta::List(list) = &meta else {
+            return Err(syn::Error::new_spanned(meta, "expected `rust_derive(...)`"));
+        };
+        if !list.path.is_ident("rust_derive") {
+            return Err(syn::Error::new_spanned(
+                &list.path,
+                "unknown `typed` option; expected `rust_derive(...)`",
+            ));
+        }
+        if rust_derives.is_some() {
+            return Err(syn::Error::new_spanned(
+                list,
+                "duplicate `rust_derive(...)` option",
+            ));
+        }
+
+        let derives = Punctuated::<Path, Token![,]>::parse_terminated
+            .parse2(list.tokens.clone())?
+            .into_iter()
+            .collect::<Vec<_>>();
+        if derives.is_empty() {
+            return Err(syn::Error::new_spanned(
+                list,
+                "`rust_derive(...)` requires at least one derive path",
+            ));
+        }
+        rust_derives = Some(derives);
+    }
+
+    Ok(rust_derives.unwrap_or_default())
 }
 
 /// Derives `egui_states::InitialValue` for a struct or fieldless enum.
@@ -144,4 +189,30 @@ fn has_serde_crate_override(attrs: &[Attribute]) -> syn::Result<bool> {
     }
 
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use quote::{ToTokens, quote};
+
+    use super::parse_typed_args;
+
+    #[test]
+    fn parses_rust_derive_paths() {
+        let derives = parse_typed_args(quote!(rust_derive(Debug, path::CustomDerive))).unwrap();
+        let derives = derives
+            .iter()
+            .map(|path| path.to_token_stream().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(derives, ["Debug", "path :: CustomDerive"]);
+    }
+
+    #[test]
+    fn rejects_invalid_typed_options() {
+        assert!(parse_typed_args(quote!(rust_derive())).is_err());
+        assert!(parse_typed_args(quote!(unknown(Debug))).is_err());
+        assert!(parse_typed_args(quote!(rust_derive(Debug), rust_derive(Hash))).is_err());
+        assert!(parse_typed_args(quote!(derive = (Debug, Hash))).is_err());
+    }
 }

@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::fmt::Debug;
 
-use egui_states::{ObjectType, Typed};
+use egui_states::{ObjectType, RustDerive, Typed};
 
 #[egui_states::typed]
 #[derive(Debug, PartialEq)]
@@ -36,6 +37,25 @@ struct DeserializeOnly {
 #[serde(crate = "egui_states::serde")]
 struct ExistingSerdeDerives {
     value: f32,
+}
+
+#[egui_states::typed(rust_derive(Debug, server_macros::CustomDerive))]
+#[derive(Clone, Debug, PartialEq)]
+struct DerivedInner {
+    value: u32,
+}
+
+#[egui_states::typed(rust_derive(Eq, Hash))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum DerivedKey {
+    Value,
+}
+
+#[egui_states::typed(rust_derive(PartialEq))]
+#[derive(Clone, Debug, PartialEq)]
+struct DerivedOuter {
+    inner: Option<Vec<DerivedInner>>,
+    values: HashMap<DerivedKey, bool>,
 }
 
 fn assert_traits<T>()
@@ -103,4 +123,35 @@ fn typed_attribute_adds_only_missing_serde_derives() {
     assert_round_trip(SerializeOnly { value: true });
     assert_round_trip(DeserializeOnly { value: -7 });
     assert_round_trip(ExistingSerdeDerives { value: 1.25 });
+}
+
+#[test]
+fn typed_attribute_reports_recursive_rust_derives() {
+    let derives = DerivedOuter::rust_derives();
+    assert_eq!(derives.len(), 3);
+
+    assert_eq!(
+        derives[0],
+        RustDerive::Struct("DerivedOuter", &["PartialEq"])
+    );
+    match derives[1] {
+        RustDerive::Struct("DerivedInner", derives) => {
+            assert_eq!(derives[0], "Debug");
+            assert_eq!(derives[1].replace(' ', ""), "server_macros::CustomDerive");
+        }
+        _ => panic!("expected DerivedInner struct metadata"),
+    }
+    assert_eq!(derives[2], RustDerive::Enum("DerivedKey", &["Eq", "Hash"]));
+}
+
+#[test]
+fn typed_attribute_reports_empty_rust_derives() {
+    assert_eq!(
+        MacroStruct::rust_derives(),
+        [RustDerive::Struct("MacroStruct", &[])]
+    );
+    assert_eq!(
+        MacroEnum::rust_derives(),
+        [RustDerive::Enum("MacroEnum", &[])]
+    );
 }
