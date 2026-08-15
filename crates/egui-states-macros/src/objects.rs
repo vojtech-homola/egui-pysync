@@ -1,14 +1,14 @@
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
-use syn::{self, Lit, parse_macro_input};
+use syn::{self, Lit, Path, parse_macro_input};
 
-pub(crate) fn impl_typed(input: TokenStream) -> TokenStream {
+pub(crate) fn impl_typed(input: TokenStream, rust_derives: &[Path]) -> TokenStream {
     let input_clone = input.clone();
     let input = parse_macro_input!(input as syn::DeriveInput);
 
     match input.data {
-        syn::Data::Struct(_) => impl_struct_typed(input_clone),
-        syn::Data::Enum(_) => impl_enum_typed(input_clone),
+        syn::Data::Struct(_) => impl_struct_typed(input_clone, rust_derives),
+        syn::Data::Enum(_) => impl_enum_typed(input_clone, rust_derives),
         syn::Data::Union(_) => panic!("Unions are not supported"),
     }
 }
@@ -24,7 +24,7 @@ pub(crate) fn impl_initial_value(input: TokenStream) -> TokenStream {
     }
 }
 
-fn impl_struct_typed(input: TokenStream) -> TokenStream {
+fn impl_struct_typed(input: TokenStream, rust_derives: &[Path]) -> TokenStream {
     let StructInfo {
         ident,
         names,
@@ -41,6 +41,16 @@ fn impl_struct_typed(input: TokenStream) -> TokenStream {
                         #((stringify!(#names).to_string(), <#types as egui_states::Typed>::get_type())),*
                     ]
                 )
+            }
+
+            #[doc(hidden)]
+            fn rust_derives() -> Vec<egui_states::RustDerive> {
+                let mut derives = vec![egui_states::RustDerive::Struct(
+                    stringify!(#ident),
+                    &[#(stringify!(#rust_derives)),*],
+                )];
+                #(derives.extend(<#types as egui_states::Typed>::rust_derives());)*
+                derives
             }
         }
     );
@@ -68,7 +78,7 @@ fn impl_struct_initial_value(input: TokenStream) -> TokenStream {
     out.into()
 }
 
-fn impl_enum_typed(input: TokenStream) -> TokenStream {
+fn impl_enum_typed(input: TokenStream, rust_derives: &[Path]) -> TokenStream {
     let EnumInfo {
         ident,
         names,
@@ -85,6 +95,14 @@ fn impl_enum_typed(input: TokenStream) -> TokenStream {
                         #((stringify!(#names).to_string(), #values)),*
                     ]
                 )
+            }
+
+            #[doc(hidden)]
+            fn rust_derives() -> Vec<egui_states::RustDerive> {
+                vec![egui_states::RustDerive::Enum(
+                    stringify!(#ident),
+                    &[#(stringify!(#rust_derives)),*],
+                )]
             }
         }
     );

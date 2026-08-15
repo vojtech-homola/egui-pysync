@@ -373,7 +373,7 @@ fn order_structs(items: &[(String, ObjectType)], order: &mut VecDeque<String>) {
 }
 
 fn render_python<S: State>() -> (String, String, String) {
-    let (states, version_hash) = scripts::parse_states::<S>();
+    let (states, version_hash, _) = scripts::parse_states::<S>();
     scripts::validate_states(&states);
 
     let mut values_list = Vec::new();

@@ -6,6 +6,51 @@ use std::path::PathBuf;
 use egui_states::build_scripts::{generate_python, generate_rust};
 use egui_states::{Image, ImageMulti, State, StatesCreator, Value};
 
+#[egui_states::typed(rust_derive(Debug, PartialEq, Eq, Hash))]
+#[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
+struct GeneratedInner {
+    enabled: bool,
+}
+
+#[egui_states::typed(rust_derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    egui_states::serde::Serialize,
+    egui_states::Typed,
+    custom_macros::Debug
+))]
+#[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
+struct GeneratedOuter {
+    inner: Option<GeneratedInner>,
+}
+
+#[egui_states::typed(rust_derive(Debug, PartialOrd, Ord))]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, egui_states::InitialValue)]
+enum GeneratedEnum {
+    #[default]
+    First,
+    Second,
+}
+
+mod first_collision {
+    #[egui_states::typed(rust_derive(Debug))]
+    #[derive(Clone, Default, egui_states::InitialValue)]
+    pub(super) struct Collision {
+        pub(super) value: bool,
+    }
+}
+
+mod second_collision {
+    #[egui_states::typed(rust_derive(Hash))]
+    #[derive(Clone, Default, egui_states::InitialValue)]
+    pub(super) struct Collision {
+        pub(super) value: bool,
+    }
+}
+
 /// A state class holding map-valued states, used twice by [`Root`].
 struct Leaf;
 
@@ -39,6 +84,13 @@ impl State for Root {
         let _: Leaf = c.substate("second");
         let _: Image = c.image("image");
         let _: ImageMulti = c.image_multi("images");
+        let _: Value<Option<GeneratedOuter>> = c.value(
+            "custom",
+            Some(GeneratedOuter {
+                inner: Some(GeneratedInner { enabled: true }),
+            }),
+        );
+        let _: Value<GeneratedEnum> = c.value("custom_enum", GeneratedEnum::First);
         Self
     }
 }
@@ -187,4 +239,59 @@ fn image_multi_codegen_and_layout_hash_are_distinct() {
 
     let _ = std::fs::remove_dir_all(&image_dir);
     let _ = std::fs::remove_dir_all(&multi_dir);
+}
+
+#[test]
+fn requested_rust_derives_are_emitted_for_nested_types() {
+    let dir = output_dir("rust_derives", 0);
+    generate_rust::<Root>(&dir).unwrap();
+    let structs = std::fs::read_to_string(dir.join("structs.rs")).unwrap();
+    let enums = std::fs::read_to_string(dir.join("enums.rs")).unwrap();
+
+    assert!(
+        structs.contains(
+            "#[derive(Clone, Debug, PartialEq, Eq, Hash, custom_macros :: Debug)]\npub struct GeneratedOuter"
+        )
+    );
+    assert!(
+        structs.contains("#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct GeneratedInner")
+    );
+    assert_eq!(structs.matches("Clone, Clone").count(), 0);
+    assert!(!structs.contains("Serialize"));
+    assert!(!structs.contains("Typed)]"));
+    assert!(enums.contains(
+        "#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]\npub enum GeneratedEnum"
+    ));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+struct ConflictingDerives;
+
+impl State for ConflictingDerives {
+    const NAME: &'static str = "ConflictingDerives";
+
+    fn new(c: &mut impl StatesCreator) -> Self {
+        let _: Value<first_collision::Collision> = c.value("first", Default::default());
+        let _: Value<second_collision::Collision> = c.value("second", Default::default());
+        Self
+    }
+}
+
+#[test]
+#[should_panic(
+    expected = "struct Collision declared with inconsistent Rust derives: [\"Debug\"] vs [\"Hash\"]"
+)]
+fn inconsistent_rust_derives_for_one_generated_name_are_rejected() {
+    let dir = output_dir("conflicting_rust_derives", 0);
+    let _ = generate_rust::<ConflictingDerives>(&dir);
+}
+
+#[test]
+fn inconsistent_rust_derives_do_not_affect_python_generation() {
+    let dir = output_dir("python_conflicting_rust_derives", 0);
+    generate_python::<ConflictingDerives>(&dir).unwrap();
+
+    assert!(dir.join("structs.py").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
 }

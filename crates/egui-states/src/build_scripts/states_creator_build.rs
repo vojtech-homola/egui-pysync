@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,105 @@ use crate::client::values::{
 };
 use crate::data_transport::DataType;
 use crate::hashing::{StableHasher, generate_value_id};
-use crate::typed::{ObjectType, Typed};
+use crate::typed::{ObjectType, RustDerive, Typed};
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RustDerives {
+    enums: BTreeMap<String, Vec<String>>,
+    structs: BTreeMap<String, Vec<String>>,
+    conflicts: Vec<String>,
+}
+
+impl RustDerives {
+    fn insert(&mut self, derive: RustDerive) {
+        match derive {
+            RustDerive::Enum(name, derives) => {
+                Self::insert_type(&mut self.enums, &mut self.conflicts, "enum", name, derives)
+            }
+            RustDerive::Struct(name, derives) => Self::insert_type(
+                &mut self.structs,
+                &mut self.conflicts,
+                "struct",
+                name,
+                derives,
+            ),
+        }
+    }
+
+    fn insert_type(
+        types: &mut BTreeMap<String, Vec<String>>,
+        conflicts: &mut Vec<String>,
+        kind: &str,
+        name: &str,
+        derives: &[&str],
+    ) {
+        let derives = derives
+            .iter()
+            .map(|derive| (*derive).to_owned())
+            .collect::<Vec<_>>();
+        match types.entry(name.to_owned()) {
+            Entry::Vacant(entry) => {
+                entry.insert(derives);
+            }
+            Entry::Occupied(entry) if entry.get() != &derives => {
+                conflicts.push(format!(
+                    "{kind} {name} declared with inconsistent Rust derives: {:?} vs {:?}",
+                    entry.get(),
+                    derives
+                ));
+            }
+            Entry::Occupied(_) => {}
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        let Self {
+            enums,
+            structs,
+            mut conflicts,
+        } = other;
+        self.conflicts.append(&mut conflicts);
+        Self::merge_types(&mut self.enums, &mut self.conflicts, "enum", enums);
+        Self::merge_types(&mut self.structs, &mut self.conflicts, "struct", structs);
+    }
+
+    fn merge_types(
+        types: &mut BTreeMap<String, Vec<String>>,
+        conflicts: &mut Vec<String>,
+        kind: &str,
+        other: BTreeMap<String, Vec<String>>,
+    ) {
+        for (name, derives) in other {
+            match types.entry(name.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(derives);
+                }
+                Entry::Occupied(entry) if entry.get() != &derives => {
+                    conflicts.push(format!(
+                        "{kind} {name} declared with inconsistent Rust derives: {:?} vs {:?}",
+                        entry.get(),
+                        derives
+                    ));
+                }
+                Entry::Occupied(_) => {}
+            }
+        }
+    }
+
+    pub(crate) fn validate(&self) {
+        if let Some(conflict) = self.conflicts.first() {
+            panic!("{conflict}");
+        }
+    }
+
+    pub(crate) fn enum_derives(&self, name: &str) -> Option<&[String]> {
+        self.enums.get(name).map(Vec::as_slice)
+    }
+
+    pub(crate) fn struct_derives(&self, name: &str) -> Option<&[String]> {
+        self.structs.get(name).map(Vec::as_slice)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum StateType {
@@ -59,6 +158,7 @@ impl StateType {
 
 pub(crate) struct StatesCreatorBuild {
     states: Vec<StateType>,
+    rust_derives: RustDerives,
     parent: String,
     sender: MessageSender,
     version_hasher: StableHasher,
@@ -70,6 +170,7 @@ impl StatesCreatorBuild {
 
         Self {
             states: Vec::new(),
+            rust_derives: RustDerives::default(),
             parent: parent.to_string(),
             sender,
             version_hasher: StableHasher::new(),
@@ -80,8 +181,14 @@ impl StatesCreatorBuild {
         self.version_hasher.finish()
     }
 
-    pub fn get_states(self) -> Vec<StateType> {
-        self.states
+    pub fn into_parts(self) -> (Vec<StateType>, RustDerives) {
+        (self.states, self.rust_derives)
+    }
+
+    fn collect_rust_derives<T: Typed>(&mut self) {
+        for derive in T::rust_derives() {
+            self.rust_derives.insert(derive);
+        }
     }
 }
 
@@ -96,7 +203,8 @@ impl StatesCreator for StatesCreatorBuild {
             .finish()
             .hash(&mut self.version_hasher);
 
-        let states = builder.get_states();
+        let (states, rust_derives) = builder.into_parts();
+        self.rust_derives.merge(rust_derives);
         self.states
             .push(StateType::SubState(name.to_owned(), S::NAME, states));
 
@@ -108,6 +216,7 @@ impl StatesCreator for StatesCreatorBuild {
         T: for<'a> Deserialize<'a> + Serialize + Clone + Typed + InitialValue,
         Q: GetQueueType,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -135,6 +244,7 @@ impl StatesCreator for StatesCreatorBuild {
     where
         T: for<'a> Deserialize<'a> + Serialize + Typed + Send + Sync + 'static,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -158,6 +268,7 @@ impl StatesCreator for StatesCreatorBuild {
         T: for<'a> Deserialize<'a> + Serialize + Clone + Typed + InitialValue + Atomic,
         Q: GetQueueType,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -185,6 +296,7 @@ impl StatesCreator for StatesCreatorBuild {
     where
         T: for<'a> Deserialize<'a> + Serialize + Clone + Typed + InitialValue,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -215,6 +327,7 @@ impl StatesCreator for StatesCreatorBuild {
             + AtomicStatic
             + 'static,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -264,6 +377,7 @@ impl StatesCreator for StatesCreatorBuild {
         T: Serialize + Clone + Typed,
         Q: GetQueueType,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
@@ -290,6 +404,8 @@ impl StatesCreator for StatesCreatorBuild {
         K: Hash + Eq + Clone + for<'a> Deserialize<'a> + Typed,
         V: Clone + for<'a> Deserialize<'a> + Typed,
     {
+        self.collect_rust_derives::<K>();
+        self.collect_rust_derives::<V>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = V::get_type().get_hash_from(K::get_type().get_hash());
@@ -314,6 +430,7 @@ impl StatesCreator for StatesCreatorBuild {
     where
         T: Clone + for<'a> Deserialize<'a> + Typed,
     {
+        self.collect_rust_derives::<T>();
         let full_name = format!("{}.{}", self.parent, name);
         let id = generate_value_id(&full_name);
         let type_id = T::get_type().get_hash();
