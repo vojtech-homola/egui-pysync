@@ -266,9 +266,10 @@ This serves the UI on port `8090`; run either example server separately on port
 
 ## Troubleshooting
 
-- Call `Image::initialize` on the client before connecting or before the server
-  sends image updates. Updates received without an initialized texture are
-  acknowledged but cannot become visible.
+- Call `Image::initialize` or `ImageMulti::initialize`, as applicable, on the
+  client before connecting or before the server sends image updates. Updates
+  received without an initialized texture are acknowledged but cannot become
+  visible.
 - Keep Rust `CallbackHandle` values alive. Dropping a handle unregisters its
   callback.
 - Add an appropriate `cargo:rerun-if-changed` line to generator build scripts,

@@ -412,6 +412,11 @@ impl Acknowledge for Image {
 
 impl SyncTrait for Image {
     fn sync(&self) -> Result<(), ()> {
+        // Serialize reconnect synchronization with producers. A stale producer
+        // may hold this lock while waiting for reset() to set the event; taking
+        // the lock here prevents sync from clearing that wake-up before the
+        // producer consumes it and observes the new generation.
+        let _lock = self.lock.lock();
         let mut w = self.image.write();
         if !w.sync_required {
             return Ok(());
@@ -859,18 +864,35 @@ mod tests {
         assert_no_message(&mut receiver);
 
         let waiting_image = image.clone();
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
         let waiter = std::thread::spawn(move || {
             let latest = [70, 80, 90, 255];
-            waiting_image.set_image(image_data(&latest, [1, 1], ImageType::ColorAlpha), false)
+            let result =
+                waiting_image.set_image(image_data(&latest, [1, 1], ImageType::ColorAlpha), false);
+            done_sender.send(result).unwrap();
         });
 
         wait_for_image(&image, &[70, 80, 90, 255]);
+        assert!(image.lock.try_lock().is_none());
 
         connected.store(false, Ordering::Release);
         image.reset();
         connected.store(true, Ordering::Release);
-        image.sync().unwrap();
-        waiter.join().unwrap().unwrap();
+        let syncing_image = image.clone();
+        let (sync_sender, sync_receiver) = std::sync::mpsc::channel();
+        let syncer = std::thread::spawn(move || {
+            sync_sender.send(syncing_image.sync()).unwrap();
+        });
+        done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("stale set producer did not finish after reconnect reset")
+            .unwrap();
+        sync_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("image sync did not finish after stale set producer")
+            .unwrap();
+        waiter.join().unwrap();
+        syncer.join().unwrap();
 
         assert_message(&mut receiver);
         assert_no_message(&mut receiver);
@@ -895,23 +917,39 @@ mod tests {
         assert_no_message(&mut receiver);
 
         let waiting_image = image.clone();
+        let (done_sender, done_receiver) = std::sync::mpsc::channel();
         let waiter = std::thread::spawn(move || {
             let update = [70, 80];
-            waiting_image.update_image(
+            let result = waiting_image.update_image(
                 &[0, 0],
                 image_data(&update, [1, 1], ImageType::GrayAlpha),
                 false,
                 false,
-            )
+            );
+            done_sender.send(result).unwrap();
         });
 
         wait_for_image(&image, &[70, 70, 70, 80, 45, 55, 65, 255]);
+        assert!(image.lock.try_lock().is_none());
 
         connected.store(false, Ordering::Release);
         image.reset();
         connected.store(true, Ordering::Release);
-        image.sync().unwrap();
-        waiter.join().unwrap().unwrap();
+        let syncing_image = image.clone();
+        let (sync_sender, sync_receiver) = std::sync::mpsc::channel();
+        let syncer = std::thread::spawn(move || {
+            sync_sender.send(syncing_image.sync()).unwrap();
+        });
+        done_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("stale update producer did not finish after reconnect reset")
+            .unwrap();
+        sync_receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("image sync did not finish after stale update producer")
+            .unwrap();
+        waiter.join().unwrap();
+        syncer.join().unwrap();
 
         assert_message(&mut receiver);
         assert_no_message(&mut receiver);

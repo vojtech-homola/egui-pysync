@@ -269,6 +269,10 @@ impl ImageMulti {
     }
 
     /// Replaces a rectangular region of the existing image at `index`.
+    ///
+    /// With `force`, a buffered update may be replaced only when it targets the
+    /// same `index` and rectangle. Updates for other indices remain ordered and
+    /// are never dropped.
     pub fn update(
         &self,
         index: u32,
