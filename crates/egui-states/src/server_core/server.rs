@@ -18,6 +18,7 @@ use crate::server_core::core;
 use crate::server_core::data_core::{Data, DataMulti};
 use crate::server_core::data_take_core::{DataMultiTake, DataTake};
 use crate::server_core::image_core::Image;
+use crate::server_core::image_multi_core::ImageMulti;
 use crate::server_core::map_core::ValueMap;
 use crate::server_core::sender::{MessageReceiver, MessageSender};
 use crate::server_core::signals::{CLIENT_MESSAGE_ID, SignalsManager};
@@ -43,6 +44,7 @@ pub(crate) struct StatesList {
     pub(crate) static_values: NoHashMap<u64, Arc<ValueStaticCore>>,
     pub(crate) signals: NoHashMap<u64, Arc<SignalCore>>,
     pub(crate) images: NoHashMap<u64, Arc<Image>>,
+    pub(crate) image_multi: NoHashMap<u64, Arc<ImageMulti>>,
     pub(crate) maps: NoHashMap<u64, Arc<ValueMap>>,
     pub(crate) lists: NoHashMap<u64, Arc<ValueList>>,
     pub(crate) data: NoHashMap<u64, Arc<Data>>,
@@ -59,6 +61,7 @@ impl StatesList {
             || self.static_values.contains_key(&id)
             || self.signals.contains_key(&id)
             || self.images.contains_key(&id)
+            || self.image_multi.contains_key(&id)
             || self.maps.contains_key(&id)
             || self.lists.contains_key(&id)
             || self.data.contains_key(&id)
@@ -90,6 +93,11 @@ impl StatesList {
         for (id, image) in self.images.iter() {
             server_list.sync.push(image.clone());
             server_list.ack.insert(*id, image.clone());
+        }
+
+        for (id, images) in self.image_multi.iter() {
+            server_list.sync.push(images.clone());
+            server_list.ack.insert(*id, images.clone());
         }
 
         for map in self.maps.values() {
@@ -526,6 +534,26 @@ impl Server {
         Ok(id)
     }
 
+    pub(crate) fn add_image_multi(&mut self, name: &str) -> Result<u64, String> {
+        if self.states_server.is_some() {
+            return Err("Cannot add new values after server has been finalized".to_string());
+        }
+
+        let id = generate_value_id(&name);
+        if self.states.contains_id(id) {
+            return Err(format!("ImageMulti with id {} already exists", id));
+        }
+
+        let value = ImageMulti::new(
+            name.to_string(),
+            id,
+            self.sender.clone(),
+            self.connected.clone(),
+        );
+        self.states.image_multi.insert(id, value);
+        Ok(id)
+    }
+
     pub(crate) fn add_data(&mut self, name: &str, type_id: u8) -> Result<u64, String> {
         if self.states_server.is_some() {
             return Err("Cannot add new values after server has been finalized".to_string());
@@ -655,6 +683,11 @@ impl Server {
     #[cfg(feature = "server")]
     pub(crate) fn get_image(&self, id: u64) -> Option<Arc<Image>> {
         self.states.images.get(&id).cloned()
+    }
+
+    #[cfg(feature = "server")]
+    pub(crate) fn get_image_multi(&self, id: u64) -> Option<Arc<ImageMulti>> {
+        self.states.image_multi.get(&id).cloned()
     }
 
     #[cfg(feature = "server")]

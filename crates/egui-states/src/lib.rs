@@ -36,7 +36,8 @@
 //!   server-to-client transfers.
 //! - [`VecState`] and [`MapState`] are server-controlled collections.
 //! - [`Data`] and [`DataMulti`] efficiently transfer numeric buffers.
-//! - [`Image`] updates an egui texture with complete images or rectangles.
+//! - [`Image`] updates one egui texture, while [`ImageMulti`] manages a sparse
+//!   collection of textures indexed by `u32` keys.
 //!
 //! # Cargo features
 //!
@@ -79,7 +80,7 @@ pub use client::{
     client::{Client, ConnectionState},
     data::{Data, DataMulti},
     data_take::{DataMultiTake, DataTake},
-    image::Image,
+    image::{Image, ImageMulti},
     initial_value::{InitValue, InitialValue},
     states_creator::StatesCreator,
     value_map::MapState,
@@ -118,4 +119,4 @@ pub use typed::{ObjectType, RustDerive, Typed};
 
 // Wire protocol version advertised during the WebSocket handshake. A mismatch
 // rejects the connection; bump this only for an incompatible message change.
-pub(crate) const PROTOCOL_VERSION: u16 = 5;
+pub(crate) const PROTOCOL_VERSION: u16 = 6;

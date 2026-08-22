@@ -7,11 +7,11 @@ use crate::State;
 use crate::client::atomics::{Atomic, AtomicStatic};
 use crate::client::data::{Data, DataMulti, private::GetDataType};
 use crate::client::data_take::{DataMultiTake, DataTake};
-use crate::client::image::Image;
+use crate::client::image::{Image, ImageMulti};
 use crate::client::initial_value::{InitValue, InitialValue};
 
 use crate::client::messages::MessageSender;
-use crate::client::states_creator::{self, StatesCreator, hash_id, hash_id_type};
+use crate::client::states_creator::{self, StatesCreator, hash_id, hash_id_kind, hash_id_type};
 use crate::client::value_map::MapState;
 use crate::client::value_vec::VecState;
 use crate::client::values::{
@@ -125,6 +125,7 @@ pub(crate) enum StateType {
     ValueTake(String, ObjectType),
     Static(String, ObjectType, InitValue),
     Image(String),
+    ImageMulti(String),
     ValueMap(String, ObjectType, ObjectType),
     ValueVec(String, ObjectType),
     Signal(String, ObjectType, bool),
@@ -142,6 +143,7 @@ impl StateType {
             | Self::ValueTake(name, ..)
             | Self::Static(name, ..)
             | Self::Image(name)
+            | Self::ImageMulti(name)
             | Self::ValueMap(name, ..)
             | Self::ValueVec(name, ..)
             | Self::Signal(name, ..)
@@ -353,6 +355,20 @@ impl StatesCreator for StatesCreatorBuild {
 
         self.states.push(StateType::Image(name.to_owned()));
 
+        value
+    }
+
+    fn image_multi(&mut self, name: &str) -> ImageMulti {
+        let full_name = format!("{}.{}", self.parent, name);
+        let id = generate_value_id(&full_name);
+        hash_id_kind(
+            &mut self.version_hasher,
+            id,
+            states_creator::IMAGE_MULTI_HASH_ID,
+        );
+
+        let value = ImageMulti::new(full_name, id, self.sender.clone());
+        self.states.push(StateType::ImageMulti(name.to_owned()));
         value
     }
 

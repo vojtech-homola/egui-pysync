@@ -1,11 +1,12 @@
 use egui::{Color32, Rect};
-use egui_states::Image;
+use egui_states::{Image, ImageMulti};
 
 use super::State;
 
 #[derive(egui_states::State)]
 pub(super) struct ImageStates {
     pub image: Image,
+    pub images: ImageMulti,
 }
 
 pub(super) fn show_image_section(ui: &mut egui::Ui, state: &mut State) {
@@ -14,6 +15,20 @@ pub(super) fn show_image_section(ui: &mut egui::Ui, state: &mut State) {
         show_image(ui, &state.image.image.get_id());
         if let Some(size) = state.image.image.get_size() {
             ui.label(format!("size = {} x {}", size[1], size[0]));
+        }
+
+        ui.separator();
+        ui.label(format!(
+            "ImageMulti: root.image.images ({} images)",
+            state.image.images.len()
+        ));
+        for index in state.image.images.indices() {
+            let size = state.image.images.get_size(index);
+            ui.label(match size {
+                Some(size) => format!("index {index}: {} x {}", size[1], size[0]),
+                None => format!("index {index}"),
+            });
+            show_image(ui, &state.image.images.get_id(index));
         }
     });
 }

@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use crate::image_transport::ImageType;
 use crate::server_core::image_core::{Image as CoreImage, ImageData};
+use crate::server_core::image_core_common::checked_fill_size;
+use crate::server_core::image_multi_core::{ImageMulti as CoreImageMulti, ImageMultiData};
 
 use super::state_server::StateServer;
 use super::{Result, ServerError};
@@ -183,6 +185,152 @@ impl Image {
     }
 }
 
+#[derive(Clone)]
+/// Server-controlled images retained as RGBA pixels and indexed by sparse `u32` keys.
+pub struct ImageMulti {
+    inner: Arc<CoreImageMulti>,
+}
+
+impl ImageMulti {
+    /// Registers an empty keyed image collection under `name`.
+    pub fn new(server: &StateServer, name: impl Into<String>) -> Result<Self> {
+        let (_, inner) = server.add_image_multi(name.into())?;
+        Ok(Self { inner })
+    }
+
+    /// Returns the image shape at `index` as `[height, width]`.
+    pub fn shape(&self, index: u32) -> Option<[usize; 2]> {
+        self.inner.get_size(index)
+    }
+
+    /// Returns a copy of the RGBA pixels and shape at `index`.
+    pub fn get(&self, index: u32) -> Option<(Vec<u8>, [usize; 2])> {
+        self.inner.get_image(index, |image| {
+            image.map(|(data, size)| (data.clone(), *size))
+        })
+    }
+
+    /// Returns the number of populated image keys.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns whether the collection contains no images.
+    pub fn is_empty(&self) -> bool {
+        self.inner.len() == 0
+    }
+
+    /// Returns whether `index` is populated.
+    pub fn contains(&self, index: u32) -> bool {
+        self.inner.contains(index)
+    }
+
+    /// Returns populated indices in ascending order.
+    pub fn indices(&self) -> Vec<u32> {
+        self.inner.indices()
+    }
+
+    /// Creates or replaces the complete image at `index`.
+    pub fn set(
+        &self,
+        index: u32,
+        data: &[u8],
+        size: [usize; 2],
+        format: ImageFormat,
+        update: bool,
+    ) -> Result<()> {
+        let stride = check_image_multi_data(data, size, format)?;
+        self.inner
+            .set_image(
+                index,
+                ImageMultiData {
+                    size,
+                    stride,
+                    contiguous: true,
+                    image_type: format.image_type(),
+                    data: data.as_ptr(),
+                },
+                update,
+            )
+            .map_err(ServerError::new)
+    }
+
+    /// Creates or replaces the image at `index` with one uniform color.
+    pub fn set_all(
+        &self,
+        index: u32,
+        shape: [usize; 2],
+        color: ImageColor,
+        update: bool,
+    ) -> Result<()> {
+        self.inner
+            .set_all_image(index, shape, color.rgba(), update)
+            .map_err(ServerError::new)
+    }
+
+    /// Replaces a rectangular region of the existing image at `index`.
+    ///
+    /// With `force`, a buffered update may be replaced only when it targets the
+    /// same `index` and rectangle. Updates for other indices remain ordered and
+    /// are never dropped.
+    pub fn update(
+        &self,
+        index: u32,
+        data: &[u8],
+        origin: [usize; 2],
+        size: [usize; 2],
+        format: ImageFormat,
+        update: bool,
+        force: bool,
+    ) -> Result<()> {
+        let stride = check_image_multi_data(data, size, format)?;
+        self.inner
+            .update_image(
+                index,
+                &origin,
+                ImageMultiData {
+                    size,
+                    stride,
+                    contiguous: true,
+                    image_type: format.image_type(),
+                    data: data.as_ptr(),
+                },
+                update,
+                force,
+            )
+            .map_err(ServerError::new)
+    }
+
+    /// Removes `index`; an absent index is a no-op.
+    pub fn remove_index(&self, index: u32, update: bool) -> Result<()> {
+        self.inner
+            .remove_index(index, update)
+            .map_err(ServerError::new)
+    }
+
+    /// Removes all image keys.
+    pub fn reset(&self, update: bool) -> Result<()> {
+        self.inner.reset_images(update).map_err(ServerError::new)
+    }
+}
+
+fn check_image_multi_data(data: &[u8], size: [usize; 2], format: ImageFormat) -> Result<usize> {
+    checked_fill_size(size).map_err(ServerError::new)?;
+    let stride = size[1]
+        .checked_mul(format.bytes_per_pixel())
+        .ok_or_else(|| ServerError::new("image dimensions overflow"))?;
+    let expected = size[0]
+        .checked_mul(stride)
+        .ok_or_else(|| ServerError::new("image dimensions overflow"))?;
+    if data.len() != expected {
+        return Err(ServerError::new(format!(
+            "invalid image data size: expected {expected}, got {}",
+            data.len()
+        )));
+    }
+    Ok(stride)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +396,105 @@ mod tests {
         assert_eq!(image.shape(), [2, 3]);
         assert_eq!(image.get().0, [7, 7, 7, 8].repeat(6));
         assert!(image.set_all([0, 3], ImageColor::Gray(0), false).is_err());
+    }
+
+    #[test]
+    fn image_multi_sparse_operations_and_validation() {
+        let server = StateServer::new(0).unwrap();
+        let images = ImageMulti::new(&server, "root.images").unwrap();
+
+        assert!(images.is_empty());
+        assert_eq!(images.get(7), None);
+        assert!(
+            images
+                .set(9, &[], [0, 1], ImageFormat::Gray, false)
+                .is_err()
+        );
+        assert!(!images.contains(9));
+        #[cfg(target_pointer_width = "64")]
+        {
+            let too_large = u32::MAX as usize + 1;
+            assert!(
+                images
+                    .set(9, &[], [1, too_large], ImageFormat::Gray, false)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("protocol limits")
+            );
+            assert!(!images.contains(9));
+        }
+        assert!(
+            images
+                .update(7, &[1], [0, 0], [1, 1], ImageFormat::Gray, false, false,)
+                .is_err()
+        );
+
+        images
+            .set(
+                7,
+                &[10, 20, 30, 40, 50, 60],
+                [1, 2],
+                ImageFormat::Color,
+                false,
+            )
+            .unwrap();
+        images
+            .set_all(2, [2, 1], ImageColor::GrayAlpha(7, 8), false)
+            .unwrap();
+        assert_eq!(images.len(), 2);
+        assert_eq!(images.indices(), vec![2, 7]);
+        assert!(images.contains(2));
+        assert_eq!(images.shape(7), Some([1, 2]));
+        assert_eq!(
+            images.get(7).unwrap().0,
+            vec![10, 20, 30, 255, 40, 50, 60, 255]
+        );
+        assert_eq!(images.get(2).unwrap().0, [7, 7, 7, 8].repeat(2));
+
+        images
+            .update(
+                7,
+                &[9, 10],
+                [0, 1],
+                [1, 1],
+                ImageFormat::GrayAlpha,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(images.get(7).unwrap().0, vec![10, 20, 30, 255, 9, 9, 9, 10]);
+
+        let before = images.get(7).unwrap();
+        assert!(
+            images
+                .update(7, &[], [0, 0], [0, 1], ImageFormat::Gray, false, false,)
+                .is_err()
+        );
+        assert_eq!(images.get(7).unwrap(), before);
+        assert!(
+            images
+                .update(7, &[1], [1, 2], [1, 1], ImageFormat::Gray, false, false,)
+                .is_err()
+        );
+        assert_eq!(images.get(7).unwrap(), before);
+        assert!(
+            images
+                .set(9, &[], [1, 1], ImageFormat::Color, false)
+                .is_err()
+        );
+        assert!(!images.contains(9));
+
+        images
+            .set_all(7, [1, 1], ImageColor::Color(1, 2, 3), false)
+            .unwrap();
+        assert_eq!(images.len(), 2);
+        assert_eq!(images.get(7).unwrap().0, vec![1, 2, 3, 255]);
+
+        images.remove_index(100, false).unwrap();
+        assert_eq!(images.len(), 2);
+        images.remove_index(2, false).unwrap();
+        assert_eq!(images.indices(), vec![7]);
+        images.reset(false).unwrap();
+        assert!(images.is_empty());
     }
 }

@@ -76,6 +76,7 @@ fn collect_object_types(values: &[StateType]) -> Vec<ObjectType> {
             }
             StateType::SubState(_, _, _)
             | StateType::Image(_)
+            | StateType::ImageMulti(_)
             | StateType::Data(_, _)
             | StateType::DataTake(_, _)
             | StateType::DataMulti(_, _)
@@ -320,6 +321,9 @@ fn state_to_line(state: &StateType, object_types: &[ObjectType]) -> String {
             )
         }
         StateType::Image(name) => format!("        self.{name}: s.Image = s.Image()\n"),
+        StateType::ImageMulti(name) => {
+            format!("        self.{name}: s.ImageMulti = s.ImageMulti()\n")
+        }
         StateType::SubState(name, state_class, _) => {
             format!("        self.{name}: {state_class} = {state_class}(parent + \".{name}\")\n")
         }

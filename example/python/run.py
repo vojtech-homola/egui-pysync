@@ -179,3 +179,12 @@ image_patch = np.zeros((64, 64, 4), dtype=np.uint8)
 image_patch[..., 1] = 220
 image_patch[..., 3] = 255
 states.image.image.update(image_patch, origin=(96, 96), update=True)
+
+# Exercise sparse creation, removal, reset, replacement, and rectangular update.
+states.image.images[99].set_all((8, 8), 64)
+states.image.images.remove_index(99)
+states.image.images[100].set_all((8, 8), 96)
+states.image.images.reset()
+states.image.images[2].set(image, update=True)
+states.image.images[7].set_all((256, 256), (25, 35, 75), update=True)
+states.image.images[7].update(image_patch, origin=(96, 96), update=True)

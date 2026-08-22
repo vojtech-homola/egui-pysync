@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use egui_states::build_scripts::{generate_python, generate_rust};
-use egui_states::{State, StatesCreator, Value};
+use egui_states::{Image, ImageMulti, State, StatesCreator, Value};
 
 #[egui_states::typed(rust_derive(Debug, PartialEq, Eq, Hash))]
 #[derive(Clone, Default, PartialEq, Eq, Hash, egui_states::InitialValue)]
@@ -82,6 +82,8 @@ impl State for Root {
     fn new(c: &mut impl StatesCreator) -> Self {
         let _: Leaf = c.substate("first");
         let _: Leaf = c.substate("second");
+        let _: Image = c.image("image");
+        let _: ImageMulti = c.image_multi("images");
         let _: Value<Option<GeneratedOuter>> = c.value(
             "custom",
             Some(GeneratedOuter {
@@ -89,6 +91,28 @@ impl State for Root {
             }),
         );
         let _: Value<GeneratedEnum> = c.value("custom_enum", GeneratedEnum::First);
+        Self
+    }
+}
+
+struct ImageRoot;
+
+impl State for ImageRoot {
+    const NAME: &'static str = "KindRoot";
+
+    fn new(c: &mut impl StatesCreator) -> Self {
+        let _: Image = c.image("value");
+        Self
+    }
+}
+
+struct ImageMultiRoot;
+
+impl State for ImageMultiRoot {
+    const NAME: &'static str = "KindRoot";
+
+    fn new(c: &mut impl StatesCreator) -> Self {
+        let _: ImageMulti = c.image_multi("value");
         Self
     }
 }
@@ -123,6 +147,10 @@ fn a_state_class_holding_a_map_can_be_reused() {
     assert!(rust.contains("pub first: Leaf"));
     assert!(rust.contains("pub second: Leaf"));
     assert!(python.contains("class Leaf(ISubStates)"));
+    assert!(rust.contains("pub image: s::Image"));
+    assert!(rust.contains("pub images: s::ImageMulti"));
+    assert!(python.contains("self.image: s.Image = s.Image()"));
+    assert!(python.contains("self.images: s.ImageMulti = s.ImageMulti()"));
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -168,6 +196,49 @@ fn map_initial_values_are_ordered_by_key() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn generated_hash(output: &str, marker: &str) -> u64 {
+    let start = output.find(marker).expect("generated version hash marker") + marker.len();
+    output[start..]
+        .split(|character: char| !character.is_ascii_digit())
+        .next()
+        .expect("generated version hash")
+        .parse()
+        .expect("numeric generated version hash")
+}
+
+#[test]
+fn image_multi_codegen_and_layout_hash_are_distinct() {
+    let image_dir = output_dir("image_kind", 0);
+    let multi_dir = output_dir("image_multi_kind", 0);
+
+    generate_rust::<ImageRoot>(&image_dir).unwrap();
+    generate_python::<ImageRoot>(image_dir.join("python")).unwrap();
+    generate_rust::<ImageMultiRoot>(&multi_dir).unwrap();
+    generate_python::<ImageMultiRoot>(multi_dir.join("python")).unwrap();
+
+    let image_rust = std::fs::read_to_string(image_dir.join("mod.rs")).unwrap();
+    let image_python = std::fs::read_to_string(image_dir.join("python/__init__.py")).unwrap();
+    let multi_rust = std::fs::read_to_string(multi_dir.join("mod.rs")).unwrap();
+    let multi_python = std::fs::read_to_string(multi_dir.join("python/__init__.py")).unwrap();
+
+    let image_hash = generated_hash(&image_rust, "pub const VERSION_HASH: u64 = ");
+    let multi_hash = generated_hash(&multi_rust, "pub const VERSION_HASH: u64 = ");
+    assert_eq!(
+        image_hash,
+        generated_hash(&image_python, "VERSION_HASH: int = ")
+    );
+    assert_eq!(
+        multi_hash,
+        generated_hash(&multi_python, "VERSION_HASH: int = ")
+    );
+    assert_ne!(image_hash, multi_hash);
+    assert!(multi_rust.contains("pub value: s::ImageMulti"));
+    assert!(multi_python.contains("self.value: s.ImageMulti = s.ImageMulti()"));
+
+    let _ = std::fs::remove_dir_all(&image_dir);
+    let _ = std::fs::remove_dir_all(&multi_dir);
 }
 
 #[test]

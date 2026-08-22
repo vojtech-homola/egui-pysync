@@ -59,6 +59,13 @@ Large numeric buffers and images are split into batches for transport and are
 published to a client handle only after the complete batch is assembled.
 Acknowledgements provide backpressure and release pending server work.
 
+All keys in an `ImageMulti` share one ordered transfer stream. Sets and updates
+that require multiple messages finish before a later remove or reset is sent;
+controls do not cancel preceding chunks. A disconnect invalidates pending work
+with a transfer generation, and reconnect synchronization resets the client
+collection before sending the server's current keys. Each synchronized image
+must be acknowledged before subsequently queued work is released.
+
 For one-shot transfers, `blocking = true` prevents a later send from overtaking
 the pending transfer. Calling the client handle's `take` method consumes the
 value and sends the acknowledgement. For numeric takes, `cache = true` also

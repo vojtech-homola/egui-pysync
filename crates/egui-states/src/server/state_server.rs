@@ -21,6 +21,7 @@ use crate::server_core::data_take_core::{
     DataMultiTake as CoreDataMultiTake, DataTake as CoreDataTake,
 };
 use crate::server_core::image_core::Image as CoreImage;
+use crate::server_core::image_multi_core::ImageMulti as CoreImageMulti;
 use crate::server_core::map_core::ValueMap as CoreMap;
 use crate::server_core::server::Server as CoreServer;
 use crate::server_core::signals::{
@@ -475,6 +476,24 @@ impl StateServer {
         let value = self.inner.server.read().get_image(id).ok_or_else(|| {
             ServerError::new(format!("image not found after registration: {name}"))
         })?;
+        Ok((id, value))
+    }
+
+    pub(super) fn add_image_multi(&self, name: String) -> Result<(u64, Arc<CoreImageMulti>)> {
+        let id = self
+            .inner
+            .server
+            .write()
+            .add_image_multi(&name)
+            .map_err(ServerError::new)?;
+        let value = self
+            .inner
+            .server
+            .read()
+            .get_image_multi(id)
+            .ok_or_else(|| {
+                ServerError::new(format!("image_multi not found after registration: {name}"))
+            })?;
         Ok((id, value))
     }
 

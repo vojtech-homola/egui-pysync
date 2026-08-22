@@ -398,6 +398,137 @@ class Image(_StaticBase):
         return self._server.image_size(self._value_id)
 
 
+class SingleImage:
+    """Handle for one indexed image within an :class:`ImageMulti` state."""
+
+    def __init__(self, server: StateServerCore, value_id: int, index: int) -> None:
+        self._server = server
+        self._value_id = value_id
+        self._index = index
+
+    def set(self, image: Buffer, update: bool = False) -> None:
+        """Create or replace this indexed image.
+
+        Args:
+            image (Buffer): Image data shaped as ``(height, width)`` or
+                ``(height, width, channels)``.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+        """
+        self._server.image_multi_set(self._value_id, self._index, image, update)
+
+    def update(
+        self,
+        image: Buffer,
+        origin: list[int] | tuple[int, int],
+        update: bool = False,
+        force: bool = False,
+    ) -> None:
+        """Update a rectangular part of this existing indexed image.
+
+        Args:
+            image (Buffer): The image rectangle to write.
+            origin (list[int] | tuple[int, int]): Top-left origin as ``(y, x)``.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+            force (bool, optional): Whether to replace a pending update for the
+                same image and rectangle. Defaults to False.
+        """
+        self._server.image_multi_update(self._value_id, self._index, image, origin, update, force)
+
+    def set_all(
+        self,
+        shape: list[int] | tuple[int, int],
+        color: ImageColor,
+        update: bool = False,
+    ) -> None:
+        """Create or replace this indexed image with one color.
+
+        Args:
+            shape (list[int] | tuple[int, int]): Image shape as ``(height,
+                width)``.
+            color (ImageColor): Gray, gray-alpha, RGB, or RGBA color.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+        """
+        self._server.image_multi_set_all(self._value_id, self._index, shape, color, update)
+
+    def get(self) -> npt.NDArray[np.uint8]:
+        """Return this indexed image.
+
+        Returns:
+            npt.NDArray[np.uint8]: RGBA image with shape ``(height, width, 4)``.
+        """
+        data, shape = self._server.image_multi_get(self._value_id, self._index)
+        return np.frombuffer(data, dtype=np.uint8).reshape((shape[0], shape[1], 4))
+
+    def shape(self) -> tuple[int, int]:
+        """Return this indexed image shape.
+
+        Returns:
+            tuple[int, int]: Image shape as ``(height, width)``.
+        """
+        return self._server.image_multi_size(self._value_id, self._index)
+
+
+class ImageMulti(_StaticBase):
+    """Sparse collection of server-controlled images indexed by integers."""
+
+    def _initialize(self, name: str, types: list[PyObjectType]) -> None:
+        self._value_id = self._server.add_image_multi(name)
+
+    def get(self, index: int) -> SingleImage:
+        """Return a handle for one image index.
+
+        Args:
+            index (int): Non-negative image index.
+
+        Returns:
+            SingleImage: Handle that can create, update, or read ``index``.
+        """
+        if not isinstance(index, int):
+            raise TypeError("index must be an integer")
+        return SingleImage(self._server, self._value_id, index)
+
+    def remove_index(self, index: int, update: bool = False) -> None:
+        """Remove an image index; an absent index is a no-op.
+
+        Args:
+            index (int): Non-negative image index.
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+        """
+        self._server.image_multi_remove_index(self._value_id, index, update)
+
+    def reset(self, update: bool = False) -> None:
+        """Remove every populated image index.
+
+        Args:
+            update (bool, optional): Whether to request a client repaint.
+                Defaults to False.
+        """
+        self._server.image_multi_reset(self._value_id, update)
+
+    def indices(self) -> list[int]:
+        """Return populated indices.
+
+        Returns:
+            list[int]: Populated indices in ascending order.
+        """
+        return self._server.image_multi_indices(self._value_id)
+
+    def __len__(self) -> int:
+        return self._server.image_multi_len(self._value_id)
+
+    def __contains__(self, index: object) -> bool:
+        if not isinstance(index, int):
+            return False
+        return self._server.image_multi_contains(self._value_id, index)
+
+    def __getitem__(self, index: int) -> SingleImage:
+        return self.get(index)
+
+
 class Map[K, V](_StaticBase):
     """Server-controlled dictionary mirrored read-only to the client."""
 

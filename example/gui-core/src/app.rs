@@ -84,6 +84,7 @@ impl MainApp {
 
         let image = ColorImage::filled([256, 256], Color32::BLACK);
         state.image.image.initialize(&cc.egui_ctx, image);
+        state.image.images.initialize(&cc.egui_ctx);
 
         Ok(Box::new(Self { state, client }))
     }
