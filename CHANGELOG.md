@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0] - 2026-08-24
+
+### 🚀 Features
+
+- Add basic documentation (AI generated) [#56](https://github.com/vojtech-homola/egui-states/pull/56)
+- Edit max message size limits [#58](https://github.com/vojtech-homola/egui-states/pull/58)
+- Improve documentation [#59](https://github.com/vojtech-homola/egui-states/pull/59)
+- Add option to add derive traits for custom types [#61](https://github.com/vojtech-homola/egui-states/pull/61)
+- Add ImageMulti state [#60](https://github.com/vojtech-homola/egui-states/pull/60)
+- Allow restart server with different parameters [#62](https://github.com/vojtech-homola/egui-states/pull/62)
+
+### 🐛 Bug Fixes
+
+- Improve sending ack in case of the failure on client side [#57](https://github.com/vojtech-homola/egui-states/pull/57)
+
 ## [0.15.0] - 2026-08-05
 
 ### 🚀 Features
