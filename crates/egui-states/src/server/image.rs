@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn image_converts_to_rgba_and_updates() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let image = Image::new(&server, "root.image").unwrap();
 
         image
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn image_rejects_invalid_and_overflowing_dimensions() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let image = Image::new(&server, "root.image").unwrap();
 
         assert!(
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn image_set_all_materializes_rgba_data() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let image = Image::new(&server, "root.image").unwrap();
 
         image
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn image_multi_sparse_operations_and_validation() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let images = ImageMulti::new(&server, "root.images").unwrap();
 
         assert!(images.is_empty());

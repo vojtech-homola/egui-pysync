@@ -121,9 +121,9 @@ and run the server:
 ```python
 from states_server import StatesServer
 
-server = StatesServer(port=8091)
+server = StatesServer()
 server.states.counter.connect(lambda value: print("counter:", value))
-server.start()
+server.start(8091)
 
 server.states.counter.set(41, update=True)
 input("Server is running; press Enter to stop.\n")
@@ -160,7 +160,7 @@ fn main() {
 ```
 
 Then declare `mod states_server;`, construct
-`states_server::StatesServer`, and call `start()`. See
+`states_server::StatesServer`, and call `start(port, ip_addr, token)`. See
 [`example/rust`](example/rust) for a complete server.
 
 ## Custom types
@@ -226,7 +226,8 @@ The handshake can reject a connection for three reasons:
 - An optional application version can be configured with
   `ClientBuilder::version` and the matching `ServerOptions` or generated
   Python-server argument.
-- An optional authentication token can be configured in the same places.
+- An optional authentication token is passed to the client builder and to each
+  server `start` call.
 
 The generated state-layout hash is exposed for use as the application version,
 but it is not enforced automatically. To reject mismatched state trees, use the
@@ -239,7 +240,8 @@ let (states, client) = builder.version(layout_version).build(8091);
 ```
 
 For Python, construct the generated server with
-`StatesServer(port=8091, version=StatesServer.VERSION_HASH)`. For Rust, set
+`StatesServer(version=StatesServer.VERSION_HASH)` and then call
+`start(8091)`. For Rust, set
 `ServerOptions::version` to `Some(StatesServer::VERSION_HASH)` before calling
 `StatesServer::with_options`.
 
@@ -278,8 +280,9 @@ This serves the UI on port `8090`; run either example server separately on port
 - `Value` messages have a serialized size limit. Client `set` rejects an
   oversized value; an in-place `write` keeps the local edit but cannot send it,
   leaving the peers out of sync until a later successful update.
-- `ServerOptions::new` binds all IPv4 interfaces by default. Set `ip_addr` when
-  the server should only be reachable through a particular interface.
+- Passing `None` for `ip_addr` when starting a server binds all IPv4
+  interfaces. Pass a specific address when the server should only be reachable
+  through that interface.
 
 See [`example/README.md`](example/README.md) for commands to run the complete
 examples and [`docs/architecture.md`](docs/architecture.md) for the protocol

@@ -155,6 +155,21 @@ fn a_state_class_holding_a_map_can_be_reused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn generated_servers_take_connection_settings_at_start() {
+    let dir = output_dir("server_start", 0);
+    let (rust, python) = generate(&dir);
+
+    assert!(rust.contains("pub fn new() -> s::Result<Self>"));
+    assert!(rust.contains(
+        "pub fn start(&self, port: u16, ip_addr: Option<std::net::Ipv4Addr>, token: Option<String>)"
+    ));
+    assert!(!python.contains("port: int"));
+    assert!(!python.contains("token: str"));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Generated bindings must be byte-identical between runs so that repeated
 /// builds do not rewrite the files.
 #[test]

@@ -482,30 +482,22 @@ class StatesServer(StateServerBase[{root_name}]):
 
     def __init__(
         self,
-        port: int,
         signals_workers: int = 3,
         error_handler: Callable[[Exception], None] | None = None,
-        ip_addr: tuple[int, int, int, int] | None = None,
         version: int | None = None,
-        token: str | None = None,
     ) -> None:
         """Initialize and finalize the generated state server.
 
         Args:
-            port (int): TCP port on which the WebSocket server listens.
             signals_workers (int, optional): Number of callback worker threads.
                 Defaults to 3.
             error_handler (Callable[[Exception], None] | None, optional):
                 Handler for callback and signal-worker exceptions. Defaults to
                 the traceback-printing handler.
-            ip_addr (tuple[int, int, int, int] | None, optional): IPv4 address
-                to bind, or ``None`` to bind all interfaces.
             version (int | None, optional): Application version required from
                 the client.
-            token (str | None, optional): Authentication token required from
-                the client.
         """
-        super().__init__({root_name}, port, signals_workers, error_handler, ip_addr, version, token)
+        super().__init__({root_name}, signals_workers, error_handler, version)
 "#
     )
     .unwrap();

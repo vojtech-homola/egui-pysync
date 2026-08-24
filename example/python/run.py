@@ -9,8 +9,8 @@ from states_server.structs import TestStruct, TestStruct2
 from egui_states import LogLevel
 
 PORT = 8091
-server = StatesServer(port=PORT)
-server.start()
+server = StatesServer()
+server.start(PORT)
 states = server.states
 
 DEFAULT_VEC = [10, -3, 27]

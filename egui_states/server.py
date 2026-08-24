@@ -79,30 +79,22 @@ class StateServerBase[T: StatesBase]:
     def __init__(
         self,
         state_class: type[T],
-        port: int,
         signals_workers: int = 3,
         error_handler: Callable[[Exception], None] | None = None,
-        ip_addr: tuple[int, int, int, int] | None = None,
         version: int | None = None,
-        token: str | None = None,
     ) -> None:
         """Initialize the state server.
 
         Args:
             state_class (type[T]): Generated root-state class.
-            port (int): TCP port on which the WebSocket server listens.
             signals_workers (int, optional): Number of worker threads that
                 invoke callbacks.
             error_handler (Callable[[Exception], None] | None, optional):
                 Handler for exceptions raised while processing callbacks.
-            ip_addr (tuple[int, int, int, int] | None, optional): IPv4 address
-                to bind, or ``None`` to bind all interfaces.
             version (int | None, optional): Application version required from
                 the client.
-            token (str | None, optional): Authentication token required from
-                the client.
         """
-        self._server = StateServerCore(port, ip_addr, version, token)
+        self._server = StateServerCore(version)
         self._signals_manager = SignalsManager(self._server, signals_workers, error_handler)
         self._states: T = state_class(self)
 
@@ -135,9 +127,22 @@ class StateServerBase[T: StatesBase]:
         """
         self._server.update(duration)
 
-    def start(self) -> None:
-        """Start the state server."""
-        self._server.start()
+    def start(
+        self,
+        port: int,
+        ip_addr: tuple[int, int, int, int] | None = None,
+        token: str | None = None,
+    ) -> None:
+        """Start the state server.
+
+        Args:
+            port (int): TCP port on which the WebSocket server listens.
+            ip_addr (tuple[int, int, int, int] | None, optional): IPv4 address
+                to bind, or ``None`` to bind all interfaces.
+            token (str | None, optional): Authentication token required from
+                the client.
+        """
+        self._server.start(port, ip_addr, token)
         self._signals_manager.start_manager()
 
     def stop(self) -> None:

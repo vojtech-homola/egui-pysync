@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn collections_round_trip_without_a_client() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let values = VecState::<i32>::new(&server, "root.values").unwrap();
         let map = MapState::<u16, String>::new(&server, "root.map").unwrap();
 

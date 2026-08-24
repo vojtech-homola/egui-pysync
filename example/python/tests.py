@@ -92,13 +92,36 @@ def _wire_collection_actions(states) -> None:
 @pytest.fixture
 def server_bundle():
     errors: list[Exception] = []
-    server = StatesServer(port=_free_port(), error_handler=errors.append)
-    server.start()
+    server = StatesServer(error_handler=errors.append)
+    server.start(_free_port())
     try:
         yield server, server.states, errors
     finally:
         if server.is_running():
             server.stop()
+
+
+def test_server_restarts_on_a_different_port() -> None:
+    first_port = _free_port()
+    second_port = _free_port()
+    while second_port == first_port:
+        second_port = _free_port()
+
+    server = StatesServer()
+    server.start(first_port, (127, 0, 0, 1), "first-token")
+    assert server.is_running()
+    server.stop()
+
+    server.start(second_port, (127, 0, 0, 1), "second-token")
+    try:
+        assert server.is_running()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            with pytest.raises(OSError):
+                probe.bind(("127.0.0.1", second_port))
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", first_port))
+    finally:
+        server.stop()
 
 
 def test_server_lifecycle_and_value_roundtrips(server_bundle: tuple[StatesServer, State, list[Exception]]) -> None:
@@ -622,8 +645,8 @@ def test_error_handler_receives_callback_failures() -> None:
         captured_errors.append(error)
         error_event.set()
 
-    server = StatesServer(port=_free_port(), error_handler=on_error)
-    server.start()
+    server = StatesServer(error_handler=on_error)
+    server.start(_free_port())
     try:
 
         def explode(_value: float) -> None:

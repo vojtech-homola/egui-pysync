@@ -1013,7 +1013,7 @@ dependencies = [
 
 [[package]]
 name = "egui_states"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "bytes",
  "egui",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "egui_states_macros"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1043,7 +1043,7 @@ dependencies = [
 
 [[package]]
 name = "egui_states_python"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "egui_states",
  "pyo3",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "gui"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "eframe",
  "egui_states",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "gui_core"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "eframe",
  "egui",
@@ -2983,7 +2983,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "rust_server_example"
-version = "0.15.0"
+version = "0.16.0"
 dependencies = [
  "egui_states",
  "gui_core",
