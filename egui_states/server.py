@@ -135,6 +135,10 @@ class StateServerBase[T: StatesBase]:
     ) -> None:
         """Start the state server.
 
+        After :meth:`stop`, the server can be started again with different
+        connection settings. Calling this method while the server is already
+        running succeeds without changing its active settings.
+
         Args:
             port (int): TCP port on which the WebSocket server listens.
             ip_addr (tuple[int, int, int, int] | None, optional): IPv4 address
