@@ -43,7 +43,9 @@ use super::{Result, ServerError, ServerOptions};
 /// Native WebSocket server that owns synchronized states and callback workers.
 ///
 /// The lifecycle is: register every state, call [`Self::finalize`], call
-/// [`Self::start`], and finally call [`Self::stop`] or drop the last clone.
+/// [`Self::start`] with connection settings, and finally call [`Self::stop`] or
+/// drop the last clone. A stopped server may be restarted with different
+/// connection settings.
 /// Generated server bindings perform registration and finalization for you.
 pub struct StateServer {
     inner: Arc<ServerInner>,
@@ -110,18 +112,14 @@ impl Drop for ServerInner {
 }
 
 impl StateServer {
-    /// Creates a server with default options for `port`.
-    pub fn new(port: u16) -> Result<Self> {
-        Self::with_options(ServerOptions::new(port))
+    /// Creates a server with default options.
+    pub fn new() -> Result<Self> {
+        Self::with_options(ServerOptions::new())
     }
 
-    /// Creates a server with explicit network, authentication, and worker options.
+    /// Creates a server with explicit application and worker options.
     pub fn with_options(options: ServerOptions) -> Result<Self> {
-        let addr = match options.ip_addr {
-            Some(addr) => SocketAddrV4::new(addr, options.port),
-            None => SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, options.port),
-        };
-        let server = CoreServer::new(addr, options.version, options.token);
+        let server = CoreServer::new(options.version);
         let signals = server.get_signals_manager();
         signals.set_to_queue(LOGGING_ID);
         signals.set_to_queue(ON_CONNECT_ID);
@@ -160,6 +158,12 @@ impl StateServer {
 
     /// Starts listening and launches callback workers.
     ///
+    /// `ip_addr` selects a specific IPv4 interface; `None` binds all IPv4
+    /// interfaces. `token` optionally requires clients to authenticate during
+    /// the handshake. After [`Self::stop`], the server may be started again
+    /// with different connection settings. Calling this while the server is
+    /// already running succeeds without changing its active settings.
+    ///
     /// The native server owns a dedicated thread and Tokio runtime; call this
     /// from synchronous application code rather than from code that requires
     /// server shutdown to run inside an existing async runtime.
@@ -168,11 +172,12 @@ impl StateServer {
     ///
     /// Returns an error if the server was not finalized, the socket cannot be
     /// bound or configured, or its runtime/thread cannot be started.
-    pub fn start(&self) -> Result<()> {
+    pub fn start(&self, port: u16, ip_addr: Option<Ipv4Addr>, token: Option<String>) -> Result<()> {
+        let addr = SocketAddrV4::new(ip_addr.unwrap_or(Ipv4Addr::UNSPECIFIED), port);
         self.inner
             .server
             .write()
-            .start()
+            .start(addr, token)
             .map_err(ServerError::new)?;
         self.start_signal_workers();
         Ok(())
@@ -684,7 +689,7 @@ mod tests {
 
     #[test]
     fn callback_handle_unregisters_on_drop() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let (id, signal) = server
             .add_signal::<u32>("root.signal".to_string(), false)
             .unwrap();
@@ -701,9 +706,9 @@ mod tests {
 
     #[test]
     fn failed_start_does_not_spawn_signal_workers() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
 
-        assert!(server.start().is_err());
+        assert!(server.start(0, None, None).is_err());
         assert!(server.inner.workers.lock().is_empty());
     }
 
@@ -711,29 +716,50 @@ mod tests {
     fn bind_errors_are_reported_and_start_can_be_retried() {
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
-        let mut options = ServerOptions::new(port);
-        options.ip_addr = Some(Ipv4Addr::LOCALHOST);
-        let server = StateServer::with_options(options).unwrap();
+        let server = StateServer::new().unwrap();
         server.finalize().unwrap();
 
-        let error = server.start().unwrap_err();
+        let error = server
+            .start(port, Some(Ipv4Addr::LOCALHOST), None)
+            .unwrap_err();
         assert!(error.message().contains("binding failed"));
         assert!(!server.is_running());
         assert!(server.inner.workers.lock().is_empty());
 
         drop(listener);
-        server.start().unwrap();
+        server.start(port, Some(Ipv4Addr::LOCALHOST), None).unwrap();
         assert!(server.is_running());
         server.stop();
     }
 
     #[test]
     fn running_server_stops_when_dropped() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         server.finalize().unwrap();
-        server.start().unwrap();
+        server.start(0, None, None).unwrap();
 
         drop(server);
+    }
+
+    #[test]
+    fn start_is_idempotent_while_server_is_running() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let server = StateServer::new().unwrap();
+        server.finalize().unwrap();
+        server.start(port, Some(Ipv4Addr::LOCALHOST), None).unwrap();
+
+        server
+            .start(
+                port,
+                Some(Ipv4Addr::LOCALHOST),
+                Some("ignored-token".to_string()),
+            )
+            .unwrap();
+        assert!(server.is_running());
+        server.stop();
     }
 
     #[cfg(feature = "client")]
@@ -743,12 +769,10 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        let mut options = ServerOptions::new(port);
-        options.ip_addr = Some(Ipv4Addr::LOCALHOST);
-        let server = StateServer::with_options(options).unwrap();
+        let server = StateServer::new().unwrap();
         let server_value = crate::server::Value::new(&server, "root.value", 0_i32, false).unwrap();
         server.finalize().unwrap();
-        server.start().unwrap();
+        server.start(port, Some(Ipv4Addr::LOCALHOST), None).unwrap();
 
         let (client_state, client) = crate::ClientBuilder::<ClientTestState>::new().build(port);
         let mut connected = false;
@@ -782,9 +806,81 @@ mod tests {
         server.stop();
     }
 
+    #[cfg(feature = "client")]
+    #[test]
+    fn stopped_server_restarts_with_new_port_and_token() {
+        let first_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let second_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let first_port = first_listener.local_addr().unwrap().port();
+        let second_port = second_listener.local_addr().unwrap().port();
+        drop(first_listener);
+        drop(second_listener);
+
+        let mut options = ServerOptions::new();
+        options.version = Some(17);
+        let server = StateServer::with_options(options).unwrap();
+        let server_value = crate::server::Value::new(&server, "root.value", 7_i32, false).unwrap();
+        server.finalize().unwrap();
+
+        server
+            .start(
+                first_port,
+                Some(Ipv4Addr::LOCALHOST),
+                Some("first-token".to_string()),
+            )
+            .unwrap();
+        let (first_state, first_client) = crate::ClientBuilder::<ClientTestState>::new()
+            .version(17)
+            .token("first-token".to_string())
+            .build(first_port);
+        for _ in 0..200 {
+            first_client.connect();
+            if server.is_connected() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(server.is_connected(), "first client did not connect");
+        server_value.set(41, false).unwrap();
+        first_client.disconnect();
+        server.stop();
+        drop(first_state);
+        drop(first_client);
+
+        server
+            .start(
+                second_port,
+                Some(Ipv4Addr::LOCALHOST),
+                Some("second-token".to_string()),
+            )
+            .unwrap();
+        let (second_state, second_client) = crate::ClientBuilder::<ClientTestState>::new()
+            .version(17)
+            .token("second-token".to_string())
+            .build(second_port);
+        for _ in 0..200 {
+            second_client.connect();
+            if server.is_connected() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(server.is_connected(), "second client did not connect");
+        for _ in 0..100 {
+            if second_state.value.get() == 41 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(second_state.value.get(), 41);
+
+        second_client.disconnect();
+        server.stop();
+    }
+
     #[test]
     fn signal_workers_dispatch_and_shutdown() {
-        let mut options = ServerOptions::new(0);
+        let mut options = ServerOptions::new();
         options.signal_workers = 3;
         let server = StateServer::with_options(options).unwrap();
         let (id, signal) = server
@@ -809,7 +905,7 @@ mod tests {
 
     #[test]
     fn connect_previous_receives_the_replaced_value() {
-        let mut options = ServerOptions::new(0);
+        let mut options = ServerOptions::new();
         options.signal_workers = 1;
         let server = StateServer::with_options(options).unwrap();
         let value = crate::server::Value::new(&server, "root.value", 1_i32, true).unwrap();
@@ -842,7 +938,7 @@ mod tests {
     /// `connect_previous` alongside it must still get one.
     #[test]
     fn plain_and_previous_callbacks_coexist_on_one_value() {
-        let mut options = ServerOptions::new(0);
+        let mut options = ServerOptions::new();
         options.signal_workers = 1;
         let server = StateServer::with_options(options).unwrap();
         let value = crate::server::Value::new(&server, "root.value", 1_i32, false).unwrap();
@@ -874,7 +970,7 @@ mod tests {
     /// was not connected when the change was claimed.
     #[test]
     fn a_previous_callback_skips_a_change_that_carries_no_previous() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let (id, _value) = server
             .add_value("root.value".to_string(), 1_i32, false)
             .unwrap();
@@ -909,7 +1005,7 @@ mod tests {
     /// otherwise the previous value keeps being carried for nobody.
     #[test]
     fn dropping_the_last_previous_callback_stops_carrying_the_previous_value() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let value = crate::server::Value::new(&server, "root.value", 1_i32, false).unwrap();
 
         let plain = value.connect(|_: i32| {});
@@ -935,7 +1031,7 @@ mod tests {
         let (release_sender, release_receiver) = mpsc::channel::<()>();
         let (entered_sender, entered_receiver) = mpsc::channel::<()>();
 
-        let mut options = ServerOptions::new(0);
+        let mut options = ServerOptions::new();
         options.signal_workers = 1;
         options.shutdown_timeout = Duration::from_millis(200);
         let server = StateServer::with_options(options).unwrap();
@@ -979,7 +1075,7 @@ mod tests {
 
     #[test]
     fn drop_is_prompt_when_workers_are_idle() {
-        let mut options = ServerOptions::new(0);
+        let mut options = ServerOptions::new();
         options.signal_workers = 3;
         options.shutdown_timeout = Duration::from_secs(5);
         let server = StateServer::with_options(options).unwrap();

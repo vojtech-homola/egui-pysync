@@ -160,31 +160,28 @@ pub(crate) struct Server {
     connected: Arc<AtomicBool>,
     stop_event: Event,
     sender: MessageSender,
-    addr: SocketAddrV4,
     states: StatesList,
     states_server: Option<ServerStatesList>,
     signals: SignalsManager,
-    handshake: core::Handshake,
+    version: Option<u64>,
 
     runner_state: RunnerState,
 }
 
 impl Server {
-    pub(crate) fn new(addr: SocketAddrV4, version: Option<u64>, token: Option<String>) -> Self {
+    pub(crate) fn new(version: Option<u64>) -> Self {
         let connected = Arc::new(AtomicBool::new(false));
         let (sender, rx) = MessageSender::new();
         let signals = SignalsManager::new();
-        let handshake = core::Handshake { version, token };
 
         let obj = Self {
             connected,
             stop_event: Event::new(),
             sender,
-            addr,
             states: StatesList::default(),
             states_server: None,
             signals,
-            handshake,
+            version,
             runner_state: RunnerState::Stopped(rx),
         };
 
@@ -211,7 +208,11 @@ impl Server {
     /// This method must not be called from inside a Tokio runtime. The server
     /// creates and owns a Tokio runtime, which must be allowed to shut down on
     /// a non-async thread.
-    pub(crate) fn start(&mut self) -> Result<(), String> {
+    pub(crate) fn start(
+        &mut self,
+        addr: SocketAddrV4,
+        token: Option<String>,
+    ) -> Result<(), String> {
         let runner_state = match self.runner_state.take() {
             RunnerState::Running(handle) if handle.is_finished() => match handle.join() {
                 Ok(rx) => RunnerState::Stopped(rx),
@@ -226,7 +227,7 @@ impl Server {
                 Ok(())
             }
             (RunnerState::Stopped(rx), Some(states_server)) => {
-                let listener = match std::net::TcpListener::bind(self.addr) {
+                let listener = match std::net::TcpListener::bind(addr) {
                     Ok(listener) => listener,
                     Err(error) => {
                         self.runner_state = RunnerState::Stopped(rx);
@@ -268,7 +269,10 @@ impl Server {
                 let values = states_server.clone();
                 let signals = self.signals.clone();
 
-                let handshake = self.handshake.clone();
+                let handshake = core::Handshake {
+                    version: self.version,
+                    token,
+                };
 
                 let server_thread = thread::Builder::new().name("StatesServer".to_string());
                 stop_event.clear();

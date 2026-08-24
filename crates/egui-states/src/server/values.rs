@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn values_round_trip_without_a_client() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let value = Value::new(&server, "root.value", String::from("initial"), false).unwrap();
         let static_value = Static::new(&server, "root.static", 10_i32).unwrap();
 
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn oversized_values_are_rejected_without_a_client() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let value = Value::new(&server, "root.value", String::from("initial"), false).unwrap();
         let static_value = Static::new(&server, "root.static", String::from("initial")).unwrap();
 
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn oversized_initial_value_is_rejected() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let too_large = "a".repeat(VALUE_MAX_SIZE + 1);
 
         assert!(Value::new(&server, "root.value", too_large.clone(), false).is_err());
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn state_ids_are_unique_across_state_kinds() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         Value::new(&server, "root.duplicate", 1_i32, false).unwrap();
 
         assert!(Static::new(&server, "root.duplicate", 1_i32).is_err());

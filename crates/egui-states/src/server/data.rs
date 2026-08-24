@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn data_round_trips_without_a_client() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let data = Data::<u16>::new(&server, "root.data").unwrap();
 
         data.set(&[1, 2, 3], false).unwrap();
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn multi_data_round_trips_without_a_client() {
-        let server = StateServer::new(0).unwrap();
+        let server = StateServer::new().unwrap();
         let data = DataMulti::<f32>::new(&server, "root.data").unwrap();
 
         data.set(3, &[1.0, 2.0], false).unwrap();

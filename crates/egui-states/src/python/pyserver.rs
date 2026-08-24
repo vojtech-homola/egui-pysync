@@ -144,21 +144,9 @@ impl StateServerCore {
 #[pymethods]
 impl StateServerCore {
     #[new]
-    #[pyo3(signature = (port, ip_addr=None, version=None, token=None))]
-    fn new(
-        port: u16,
-        ip_addr: Option<[u8; 4]>,
-        version: Option<u64>,
-        token: Option<String>,
-    ) -> PyResult<Self> {
-        let addr = match ip_addr {
-            Some(addr) => {
-                SocketAddrV4::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), port)
-            }
-            None => SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), port),
-        };
-
-        let server = Server::new(addr, version, token);
+    #[pyo3(signature = (version=None))]
+    fn new(version: Option<u64>) -> PyResult<Self> {
+        let server = Server::new(version);
         let signals = server.get_signals_manager();
 
         let mut types = NoHashMap::default();
@@ -289,10 +277,17 @@ impl StateServerCore {
         }
     }
 
-    fn start(&self) -> PyResult<()> {
+    #[pyo3(signature = (port, ip_addr=None, token=None))]
+    fn start(&self, port: u16, ip_addr: Option<[u8; 4]>, token: Option<String>) -> PyResult<()> {
+        let addr = match ip_addr {
+            Some(addr) => {
+                SocketAddrV4::new(Ipv4Addr::new(addr[0], addr[1], addr[2], addr[3]), port)
+            }
+            None => SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port),
+        };
         self.server
             .write()
-            .start()
+            .start(addr, token)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))
     }
 

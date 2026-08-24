@@ -15,7 +15,7 @@ fn default_map() -> HashMap<u16, u32> {
 }
 
 fn main() -> s::Result<()> {
-    let server = StatesServer::new(PORT)?;
+    let server = StatesServer::new()?;
     let states = &server.states;
 
     let mut callbacks = Vec::new();
@@ -334,7 +334,7 @@ fn main() -> s::Result<()> {
         false,
     )?;
 
-    server.start()?;
+    server.start(PORT, None, None)?;
     println!("Rust egui-states server listening on port {PORT}");
 
     loop {
