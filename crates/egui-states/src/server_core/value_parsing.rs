@@ -19,6 +19,14 @@ impl ValueParser {
             self.pointer += size;
         })
     }
+
+    pub(crate) fn is_finished(&self) -> bool {
+        self.pointer == self.value.len()
+    }
+
+    pub(crate) fn remaining_len(&self) -> usize {
+        self.value.len().saturating_sub(self.pointer)
+    }
 }
 
 pub(crate) struct ValueCreator {

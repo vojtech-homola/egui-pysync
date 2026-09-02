@@ -1033,6 +1033,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_states_c"
+version = "0.16.0"
+dependencies = [
+ "egui_states",
+]
+
+[[package]]
 name = "egui_states_macros"
 version = "0.16.0"
 dependencies = [

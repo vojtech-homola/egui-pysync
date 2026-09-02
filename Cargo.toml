@@ -3,6 +3,7 @@ members = [
     "crates/egui-states",
     "crates/egui-states-macros",
     "crates/egui-states-python",
+    "crates/egui-states-c",
 
     "example/gui-core",
     "example/gui",

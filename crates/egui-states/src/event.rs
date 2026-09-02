@@ -2,6 +2,8 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+#[cfg(feature = "c_api")]
+use std::time::{Duration, Instant};
 
 use event_listener::Event as ListenerEvent;
 #[cfg(any(feature = "server", feature = "python"))]
@@ -124,6 +126,43 @@ impl Event {
             }
 
             listener.wait();
+        }
+    }
+
+    #[cfg(feature = "c_api")]
+    pub(crate) fn wait_clear_timeout(&self, timeout: Duration) -> bool {
+        let start = Instant::now();
+        loop {
+            if self
+                .0
+                .flag
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return true;
+            }
+
+            let listener = self.0.notify.listen();
+
+            if self
+                .0
+                .flag
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return true;
+            }
+
+            let Some(remaining) = timeout.checked_sub(start.elapsed()) else {
+                return false;
+            };
+            if listener.wait_timeout(remaining).is_none() {
+                return self
+                    .0
+                    .flag
+                    .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok();
+            }
         }
     }
 

@@ -45,6 +45,9 @@ ignore = [
     "D100",    # undocumented-public-module
 ]
 
+[tool.basedpyright]
+reportExplicitAny = false
+
 [tool.git-cliff.changelog]
 header = "# Changelog\n"
 body = """

@@ -62,6 +62,10 @@ mod typed;
 /// Build-time generators for typed Rust and Python server bindings.
 #[cfg(feature = "build_scripts")]
 pub mod build_scripts;
+/// Internal support for the companion C ABI crate.
+#[cfg(feature = "c_api")]
+#[doc(hidden)]
+pub mod c_api;
 #[cfg(feature = "client")]
 mod client;
 /// Python extension-module support used by the `egui-states` Python package.

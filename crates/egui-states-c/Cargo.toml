@@ -1,0 +1,15 @@
+[package]
+name = "egui_states_c"
+version.workspace = true
+edition.workspace = true
+description = "C ABI for the egui-states server"
+license = "MIT"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+egui_states = { path = "../egui-states", default-features = false, features = ["c_api"] }
+
+[dev-dependencies]
+egui_states = { path = "../egui-states", default-features = false, features = ["c_api", "client"] }

@@ -5,9 +5,9 @@
 
 `egui-states` synchronizes typed application state between an
 [`egui`](https://github.com/emilk/egui) UI and a server. The UI is the Rust
-client; the server can be written in Python or Rust. Both native and WebAssembly
-egui clients use the same state API and communicate with the server over a
-WebSocket connection.
+client; the server can be written in Python, Rust, or C. Both native and
+WebAssembly egui clients use the same state API and communicate with the server
+over a WebSocket connection.
 
 The project is useful when an egui application is primarily a view and control
 surface for work performed elsewhere—for example, a Python data-processing
@@ -58,6 +58,7 @@ root state is registered as `root.counter`; a field inside `controls` becomes
 | `client` | yes | egui client state handles and `ClientBuilder` |
 | `server` | no | Native Rust server API in `egui_states::server` |
 | `python` | no | PyO3 support used to build the Python extension module |
+| `c_api` | no | Internal dynamic server support used by the C ABI crate |
 | `build_scripts` | no | `generate_python` and `generate_rust` binding generators |
 
 ## Minimal Python-server workflow
@@ -162,6 +163,59 @@ fn main() {
 Then declare `mod states_server;`, construct
 `states_server::StatesServer`, and call `start(port, ip_addr, token)`. See
 [`example/rust`](example/rust) for a complete server.
+
+## C server ABI
+
+The `egui_states_c` workspace crate exposes the low-level state server through
+a C ABI. It produces both a dynamic library and a static library:
+
+```console
+cargo build --release -p egui_states_c
+```
+
+The single public header is
+[`crates/egui-states-c/include/egui_states.h`](crates/egui-states-c/include/egui_states.h).
+Build outputs use the `egui_states_c` library name, for example
+`libegui_states_c.so` and `libegui_states_c.a` on Linux. Define
+`EGUI_STATES_STATIC` before including the header when linking the static
+library on Windows. Static linking may also require the native system libraries
+reported by `cargo rustc -p egui_states_c --release -- --print native-static-libs`.
+
+The C ABI is the dynamic counterpart of the Python `_core` module. Applications
+construct protocol type descriptors and immutable values, register every state,
+finalize the server, and then start it:
+
+```c
+#include "egui_states.h"
+
+egui_states_server_t *server = NULL;
+egui_states_object_type_t *i32_type = NULL;
+egui_states_value_t *initial = NULL;
+uint64_t value_id = 0;
+egui_states_string_view_t name = {"root.value", 10};
+
+egui_states_server_create(NULL, &server);
+egui_states_object_type_i32(&i32_type);
+egui_states_value_create_i32(0, &initial);
+egui_states_server_add_value(server, name, i32_type, initial, 0, &value_id);
+egui_states_server_finalize(server);
+egui_states_server_start(server, 8091, NULL, NULL);
+
+egui_states_value_destroy(initial);
+egui_states_object_type_destroy(i32_type);
+/* Use value_id with egui_states_server_value_get/set. */
+
+egui_states_server_stop(server);
+egui_states_server_destroy(server);
+```
+
+Every fallible call returns `egui_states_status_t`; a thread-local diagnostic is
+available from `egui_states_last_error_message()`. Input buffers are copied or
+serialized during the call. Composite type/value constructors deep-copy their
+children, while nested accessors return borrowed pointers owned by their root
+value or signal event. The header documents buffer sizing and concurrency
+rules. This initial C API is manual and does not include generated C bindings or
+prebuilt binaries.
 
 ## Custom types
 

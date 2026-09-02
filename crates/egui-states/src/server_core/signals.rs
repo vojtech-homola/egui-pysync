@@ -2,6 +2,8 @@ use std::collections::{VecDeque, hash_map::Entry};
 use std::sync::Arc;
 #[cfg(feature = "server")]
 use std::sync::atomic::AtomicBool;
+#[cfg(feature = "c_api")]
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -267,6 +269,32 @@ impl SignalsManager {
         }
     }
 
+    #[cfg(feature = "c_api")]
+    pub(crate) fn wait_changed_value_timeout(
+        &self,
+        timeout: Option<Duration>,
+    ) -> Option<(u64, Bytes, Option<Bytes>)> {
+        let start = Instant::now();
+        loop {
+            if let Some(value) = self.values.lock().get(None) {
+                // Event is level-triggered, so cascade a wake-up when more than one
+                // id arrived before the first waiter cleared the flag.
+                self.event.set_one();
+                return Some(value);
+            }
+
+            match timeout {
+                None => self.event.wait_clear(),
+                Some(timeout) => {
+                    let remaining = timeout.checked_sub(start.elapsed())?;
+                    if !self.event.wait_clear_timeout(remaining) {
+                        return None;
+                    }
+                }
+            }
+        }
+    }
+
     #[cfg(feature = "server")]
     pub(crate) fn try_changed_value(
         &self,
@@ -292,7 +320,7 @@ impl SignalsManager {
 
     /// Releases an id that was handed out but will never be passed back as
     /// `last_id`, because the caller failed before it could use the value.
-    #[cfg(feature = "python")]
+    #[cfg(any(feature = "python", feature = "c_api"))]
     pub(crate) fn release(&self, id: u64) {
         self.values.lock().blocked_list.remove(&id);
         // Anything that arrived while the id was blocked did not set the event

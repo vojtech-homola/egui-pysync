@@ -94,13 +94,13 @@ class StateServerBase[T: StatesBase]:
             version (int | None, optional): Application version required from
                 the client.
         """
-        self._server = StateServerCore(version)
-        self._signals_manager = SignalsManager(self._server, signals_workers, error_handler)
+        self._server: StateServerCore = StateServerCore(version)
+        self._signals_manager: SignalsManager = SignalsManager(self._server, signals_workers, error_handler)
         self._states: T = state_class(self)
 
         _initialize(self._states, "root", self._server, self._signals_manager, self._states._get_obj_types())
         self._server.finalize()
-        self.logging = LoggingSignal(self._signals_manager, self._server)
+        self.logging: LoggingSignal = LoggingSignal(self._signals_manager, self._server)
         self._on_connect: Callable[[str], Any] | None = None
         self._on_disconnect: Callable[[], Any] | None = None
         self._on_client_message: Callable[[str], Any] | None = None

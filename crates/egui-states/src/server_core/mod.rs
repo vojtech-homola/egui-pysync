@@ -10,7 +10,7 @@ pub(crate) mod image_multi_core;
 pub(crate) mod map_core;
 pub(crate) mod server;
 pub(crate) mod signals;
-#[cfg(feature = "python")]
+#[cfg(any(feature = "python", feature = "c_api"))]
 pub(crate) mod value_parsing;
 pub(crate) mod values_core;
 pub(crate) mod vec_core;
