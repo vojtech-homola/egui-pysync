@@ -22,6 +22,8 @@ __pycache__
 # version
 /egui_states/version.py
 
-# generated example server bindings
-/example/python/states_server/
-/example/rust/src/states_server/
+
+# Generated fixtures and example Python bindings
+/tests/generated/
+/example/showcase/python/showcase_bindings/
+/example/counter/python/counter_bindings/

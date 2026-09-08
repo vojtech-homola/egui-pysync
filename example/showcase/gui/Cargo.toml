@@ -1,0 +1,23 @@
+[package]
+publish = false
+name = "showcase_gui"
+version.workspace = true
+edition.workspace = true
+description = "Native and WebAssembly feature showcase"
+
+[[bin]]
+name = "showcase-gui"
+path = "main.rs"
+
+[dependencies]
+showcase_gui_core = { path = "../gui-core" }
+eframe = "0.36"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+log = "0.4"
+web-sys = "0.3"
+
+[build-dependencies]
+egui_states = { workspace = true, features = ["build_scripts"] }
+showcase_gui_core = { path = "../gui-core" }

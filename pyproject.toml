@@ -131,4 +131,4 @@ commit_preprocessors = [
 # repo = "egui-states"
 
 [tool.pytest]
-testpaths = ["example/python/tests.py"]
+testpaths = ["tests/python"]

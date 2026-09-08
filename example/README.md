@@ -1,61 +1,19 @@
-# Running the examples
+# Examples
 
-The examples share the state definition and egui application in `gui-core`.
-Building `gui` generates Python bindings in `python/states_server`; building
-`rust_server_example` generates native Rust bindings in
-`rust/src/states_server`. Generated files are build artifacts—change the state
-definition and rebuild instead of editing them by hand.
+Each example owns its state definitions, GUI, servers, and run instructions.
+Both remain members of the repository's Cargo workspace and use the library from
+`crates/egui-states`; neither example depends on the other.
 
-All variants use WebSocket port `8091`. Start one server and one client.
+- [Counter](counter/README.md): start here. A small native GUI with a count and a
+  reset signal, backed by either a Python or Rust server. Its UI library defines
+  `CounterState` for the GUI binary and Rust server's build script. The UI's own
+  build script uses `#[path]` to load the library source and generate Python bindings.
+- [Showcase](showcase/README.md): explore all state kinds, collections, arrays,
+  take transfers, and images through a native or browser GUI. Its application
+  library contains state and rendering; the launcher package's build script
+  imports that library to generate Python bindings.
 
-## Native GUI with the Python server
-
-From the repository root, build or run the GUI once to generate the Python
-package:
-
-```sh
-cargo run -p gui --bin GuiTest
-```
-
-In another terminal, start the Python server:
-
-```sh
-uv run python example/python/run.py
-```
-
-Use the Connect button in the GUI to establish the connection.
-
-## Native GUI with the Rust server
-
-Start the generated Rust server:
-
-```sh
-cargo run -p rust_server_example --bin RustServerExample
-```
-
-Then run the GUI in another terminal:
-
-```sh
-cargo run -p gui --bin GuiTest
-```
-
-## WebAssembly GUI
-
-Install Trunk and the Rust WASM target, then run this command from the
-repository root:
-
-```sh
-rustup target add wasm32-unknown-unknown
-trunk serve
-```
-
-Open the URL printed by Trunk (configured as port `8090`) and run either server
-above on port `8091`. The browser client currently connects to that fixed port.
-
-## Python tests
-
-After building the extension module, run:
-
-```sh
-uv run pytest
-```
+Library tests have an independent schema under `tests/schema`. Run them from the
+repository root with `uv run pytest`. Example smoke tests are opt-in:
+`uv run pytest tests/examples` and `cargo test -p example_smoke_tests`.
+See [the test guide](../tests/README.md) for coverage and validation commands.

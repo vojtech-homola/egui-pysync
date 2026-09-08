@@ -12,17 +12,23 @@ and synchronization bookkeeping.
    layout hash.
 2. `ClientBuilder` walks that type to create client handles and the message
    dispatch table.
-3. `generate_python` or `generate_rust` walks the same type during `build.rs`
-   and writes matching server bindings.
+3. `generate_python` or `generate_rust` walks the same state definition from a
+   build script or a generator executable and writes matching server bindings.
 4. The peers always compare the wire-protocol version during the WebSocket
    handshake. They can also compare an application version and token when those
    checks are configured.
 
 Generated bindings should not be edited. Their contents and layout hash are
-derived from the shared Rust state type. The layout hash is not enforced by
+derived from the shared Rust state definition. The layout hash is not enforced by
 default; applications can pass `ClientBuilder::get_version_hash()` as the
 client application version and the generated `StatesServer::VERSION_HASH` as
 the server version to reject mismatched state trees during the handshake.
+
+The state definition can be imported from a library crate or compiled from the
+same source module into both the GUI and build-script crates. The README
+compares [ways to organize state definitions and binding generation](../README.md#organizing-state-definitions-and-binding-generation),
+including a generator binary target and separate application-library and
+launcher packages.
 
 ## State directions
 

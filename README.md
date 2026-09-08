@@ -21,8 +21,8 @@ serialization, and synchronization logic.
    handles.
 2. Derive `State` so the client can construct the tree and calculate its stable
    layout hash.
-3. Generate matching Python or Rust server bindings from that same Rust type in
-   a build script.
+3. Generate matching Python or Rust server bindings from the same state
+   definition, using a build script or a generator executable.
 4. Start the server and connect the egui client. During the handshake, both
    peers compare the wire-protocol version and any configured application
    version or token. Updates are then serialized, type-checked, and applied to
@@ -51,6 +51,22 @@ State paths follow the Rust field hierarchy. A field named `counter` on the
 root state is registered as `root.counter`; a field inside `controls` becomes
 `root.controls.<field>`.
 
+## Runnable examples and tests
+
+Start with the [counter](example/counter/README.md): one native
+GUI, two fields, and interchangeable Python and Rust servers. Continue with the
+[showcase](example/showcase/README.md) for all supported
+features, including the browser GUI. The counter loads its UI-owned state module
+into its build-script crate with `#[path]`. The showcase keeps state and rendering
+in an application library package used by the GUI launcher's build script.
+Neither example depends on the other; building either GUI package generates its
+Python bindings.
+
+Run independent Python library tests with `uv run pytest`; they generate their
+own fixtures automatically. Example smoke tests are opt-in with
+`uv run pytest tests/examples` and `cargo test -p example_smoke_tests`.
+See [tests/README.md](tests/README.md) for Rust integration and build checks.
+
 ## Feature flags
 
 | Feature | Default | Enables |
@@ -62,10 +78,13 @@ root state is registered as `root.counter`; a field inside `controls` becomes
 
 ## Minimal Python-server workflow
 
-Server generation must import the same Rust state type as the UI. In a real
-workspace, put that type in a small shared library crate and use it as both a UI
-dependency and a build dependency. The complete arrangement is demonstrated in
-[`example/`](example/); the essential pieces are shown below.
+Server generation must use the same state definition as the UI. The workflow
+below puts that definition in a separate package, `ui_state`, whose library
+crate is a dependency of both the GUI crate and its build-script crate. The
+[examples](example/) demonstrate other arrangements. This separate state
+package is one option; see
+[Organizing state definitions and binding generation](#organizing-state-definitions-and-binding-generation)
+for three alternatives that keep the state definitions in the UI package.
 
 Define the state shared by the UI and generator:
 
@@ -89,8 +108,9 @@ fn main() {
 }
 ```
 
-The build script needs `egui_states` with the `build_scripts` feature and the
-shared state crate as build dependencies:
+In the UI package's manifest, the build script needs `egui_states` with the
+`build_scripts` feature and the `ui_state` package as build dependencies. The
+GUI also needs both packages under `[dependencies]`:
 
 ```toml
 [build-dependencies]
@@ -115,8 +135,8 @@ if ui.button("Increment").clicked() {
 }
 ```
 
-After building the UI crate, add the generated package to Python's import path
-and run the server:
+After building the UI package, add the generated Python package's parent
+directory to Python's import path and run the server:
 
 ```python
 from states_server import StatesServer
@@ -136,7 +156,7 @@ new value.
 
 To generate a native Rust server instead, use
 `egui_states::build_scripts::generate_rust` and enable the `server` feature in
-the server crate:
+the Rust server package's manifest:
 
 ```toml
 [dependencies]
@@ -161,7 +181,176 @@ fn main() {
 
 Then declare `mod states_server;`, construct
 `states_server::StatesServer`, and call `start(port, ip_addr, token)`. See
-[`example/rust`](example/rust) for a complete server.
+[`example/counter/rust`](example/counter/rust) for a complete server.
+
+## Organizing state definitions and binding generation
+
+The generator executes `State::new` with a state-description builder; it does
+not parse UI source files or inspect a running GUI. Any executable that can
+construct that description can generate bindings. The `build_scripts` feature
+enables the generators even when they are called outside a build script.
+
+In Rust terminology:
+
+- A **package** is defined by `Cargo.toml` and can contain one library target
+  and multiple binary targets.
+- A **crate** is a compilation unit. The library target, each binary target,
+  and the build script are compiled as separate crates.
+- A **module** organizes code within a crate. The same source file can be
+  loaded as a module into more than one crate.
+
+Cargo compiles and executes a package's `build.rs` before compiling its library
+and binary targets. Adding `src/lib.rs` therefore does not let that package's
+build-script crate import its own library crate: that would introduce a build
+dependency cycle. Ordinary binary targets can use their package's library crate.
+See [Cargo build scripts](https://doc.rust-lang.org/cargo/reference/build-scripts.html)
+and [Cargo targets](https://doc.rust-lang.org/cargo/reference/cargo-targets.html).
+
+Besides the separate state package used above, these three arrangements are
+available. The layouts and package names below are illustrative.
+
+| Arrangement | State ownership | Generation trigger | Main tradeoff |
+| --- | --- | --- | --- |
+| Load one source module into the GUI and build-script crates | UI package | Building the GUI package | Source compiled in multiple crate contexts |
+| Add a generator binary target | UI package's library crate | Explicit `cargo run` command | Generation is a separate execution step |
+| Separate application-library and launcher packages | Application package's library crate | Building the launcher package | Two packages; application dependencies may also be built for the host |
+
+### 1. Load the UI's state module into the build-script crate
+
+Keep the state definition in the UI package's source tree:
+
+```text
+gui/
+├── Cargo.toml
+├── build.rs
+└── src/
+    ├── main.rs
+    ├── app.rs
+    └── state.rs
+```
+
+The GUI binary crate declares `mod state;` in `src/main.rs`. Its build-script
+crate loads the same file using Rust's
+[`path` attribute](https://doc.rust-lang.org/reference/items/modules.html#the-path-attribute):
+
+```rust
+// gui/build.rs
+#[path = "src/state.rs"]
+mod state;
+
+fn main() {
+    println!("cargo:rerun-if-changed=src/state.rs");
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    egui_states::build_scripts::generate_python::<state::AppState>(
+        output.join("states_server"),
+    )
+    .unwrap();
+}
+```
+
+There is one maintained source definition, compiled into separate modules and
+types in the two crates. Declare the state module's dependencies in both
+`[dependencies]` and `[build-dependencies]`, enabling `egui_states/build_scripts`
+for the latter. Keep rendering and application initialization outside this
+module, and ensure its module paths work in both crate contexts. If it contains
+submodules, track their source directory with `cargo:rerun-if-changed` as well.
+
+Build scripts run on the host, including when the GUI target is WASM. Avoid
+target-specific fields or defaults that would make the generated description
+differ from the GUI's state definition.
+
+A Rust server package's build script can also load the UI-owned source module
+through a relative path and call `generate_rust`. Alternatively, add a library
+target to the UI package that exposes `pub mod state;`. The GUI binary imports
+the state from that library, and the Rust server package declares the UI package
+as a build dependency. Its build script can then import the UI library crate
+normally; only the UI's own build script needs `#[path]` to load the state source.
+
+The [counter example](example/counter/README.md) uses this library-target variant,
+with `CounterState` defined directly in [gui/src/lib.rs](example/counter/gui/src/lib.rs).
+Its UI build script loads that file as a module using `#[path = "src/lib.rs"]`.
+Building the Rust server automatically builds the UI library and runs the UI build script,
+which also generates Python bindings. This compiles the UI package's dependencies
+for the host, including eframe unless made optional and disabled for that build.
+
+### 2. Add a generator binary target to the UI package
+
+A package named `my_ui` can expose the state through its library crate and use
+it from both a GUI binary and a generator binary:
+
+```text
+gui/
+├── Cargo.toml
+└── src/
+    ├── lib.rs              # pub mod state;
+    ├── state.rs
+    ├── app.rs
+    ├── main.rs             # GUI binary crate root
+    └── bin/
+        └── generate-server.rs
+```
+
+Both binary crates import `my_ui::state::AppState` from the library crate. For
+example, the generator binary can contain:
+
+```rust
+use my_ui::state::AppState;
+
+fn main() -> Result<(), String> {
+    let output = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("python/states_server");
+    egui_states::build_scripts::generate_python::<AppState>(output)
+}
+```
+
+Enable `egui_states/build_scripts` under the package's normal `[dependencies]`
+for this executable, optionally through a generation feature. Run it explicitly:
+
+```sh
+cargo run -p my_ui --bin generate-server
+```
+
+Here `-p` selects the package and `--bin` selects its binary target. A plain
+`cargo build` does not execute the generator; a project task can run generation
+before building the GUI or server. The generator must run as a host executable,
+even if the GUI is subsequently built for WASM. Rendering modules and eframe can
+be feature-gated to avoid compiling them for generation. This arrangement suits
+projects that prefer ordinary library imports and an explicit generation step.
+
+### 3. Separate the application-library and launcher packages
+
+Put state definitions and application code in the library crate of a package
+such as `my_ui_core`. A second package, `my_ui`, contains a thin GUI binary and
+its build script. The launcher package declares `my_ui_core` under both
+`[dependencies]` and `[build-dependencies]`.
+
+The launcher's binary crate and build-script crate can then import
+`my_ui_core::AppState` through ordinary package dependencies. There is no cycle,
+provided the application package does not depend on the launcher. Its library
+crate can also be used by a Rust server package's build script.
+
+Generation runs automatically when the launcher package is built. The cost is
+an additional package and potentially compiling application dependencies for
+the host as well as the GUI target. Feature-gating rendering can reduce that
+cost. This arrangement fits an application that already separates reusable UI
+code from its native or browser entry points. The
+[showcase example](example/showcase/README.md) uses this arrangement:
+`showcase_gui_core` exports `ShowcaseState` and `MainApp`, and `showcase_gui`
+depends on that package for both its GUI binary and its build script.
+
+### Generated output locations
+
+State ownership and output location are separate choices. Cargo recommends
+that build scripts write into `OUT_DIR`; the first alternative above follows
+that convention. An explicit export step can place Python bindings in a stable
+import directory. A generator executable can accept an output path or choose
+one relative to its package, as shown in the second alternative.
+
+The current examples automatically write Python bindings into their ignored
+`python/*_bindings/` directories for convenient imports. Their Rust server build
+scripts generate Rust bindings into their own `OUT_DIR`. Whichever arrangement
+you choose, regenerate bindings when the state definition changes and avoid
+editing generated files.
 
 ## Custom types
 

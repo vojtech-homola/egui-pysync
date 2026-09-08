@@ -1,0 +1,17 @@
+[package]
+name = "showcase_server"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "showcase-server"
+path = "main.rs"
+
+[dependencies]
+egui_states = { path = "../../../crates/egui-states", default-features = false, features = ["server"] }
+tokio = { version = "1.52", features = ["rt", "signal"] }
+
+[build-dependencies]
+egui_states = { workspace = true, features = ["build_scripts"] }
+showcase_gui_core = { path = "../gui-core" }

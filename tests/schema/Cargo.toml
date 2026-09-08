@@ -1,0 +1,8 @@
+[package]
+name = "egui_states_test_schema"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+egui_states = { workspace = true }

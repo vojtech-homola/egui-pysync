@@ -1,0 +1,122 @@
+use crate::{DEFAULT_VEC, bindings::StatesServer, default_map};
+use egui_states::server as s;
+
+pub fn register_callbacks(server: &StatesServer) -> Vec<s::CallbackHandle> {
+    let states = &server.states;
+    let mut callbacks = Vec::new();
+    callbacks.push(server.logging.add_logger(s::LogLevel::Debug, |message| {
+        println!("Debug: {message}");
+    }));
+    callbacks.push(server.logging.add_logger(s::LogLevel::Info, |message| {
+        println!("Info: {message}");
+    }));
+    callbacks.push(server.logging.add_logger(s::LogLevel::Warning, |message| {
+        println!("Warning: {message}");
+    }));
+    callbacks.push(server.logging.add_logger(s::LogLevel::Error, |message| {
+        println!("Error: {message}");
+    }));
+
+    callbacks.push(states.values.ratio.connect(|value| {
+        println!("ratio changed: {value:.3}");
+    }));
+    callbacks.push(states.values.title.connect(|value| {
+        println!("title changed: {value}");
+    }));
+    callbacks.push(states.values.count.connect_previous(|value, previous| {
+        println!("count changed: {previous} -> {value}");
+    }));
+    callbacks.push(states.values.primary_choice.connect(|value| {
+        println!("enum changed: {value:?}");
+    }));
+    callbacks.push(states.signals.empty_signal.connect_empty(|| {
+        println!("empty signal emitted");
+    }));
+    callbacks.push(states.signals.number_signal.connect(|value| {
+        println!("number signal emitted: {value:.3}");
+    }));
+    callbacks.push(states.signals.enum_signal.connect(|value| {
+        println!("enum signal emitted: {value:?}");
+    }));
+
+    let value_vec = states.value_vec.items.clone();
+    callbacks.push(states.value_vec.actions.reset_demo.connect_empty(move || {
+        if let Err(error) = value_vec.set(DEFAULT_VEC.to_vec(), true) {
+            eprintln!("failed to reset value_vec: {error}");
+        }
+    }));
+
+    let value_vec = states.value_vec.items.clone();
+    callbacks.push(states.value_vec.actions.append_item.connect_empty(
+        move || match value_vec.get() {
+            Ok(current) => {
+                let next_value = current.last().map_or(DEFAULT_VEC[0], |value| value + 5);
+                if let Err(error) = value_vec.add_item(next_value, true) {
+                    eprintln!("failed to append value_vec item: {error}");
+                } else {
+                    println!("value_vec appended: {next_value}");
+                }
+            }
+            Err(error) => eprintln!("failed to read value_vec: {error}"),
+        },
+    ));
+
+    let value_vec = states.value_vec.items.clone();
+    callbacks.push(states.value_vec.actions.remove_last.connect_empty(move || {
+        match value_vec.len().checked_sub(1) {
+            Some(index) => {
+                if let Err(error) = value_vec.remove_item(index, true) {
+                    eprintln!("failed to remove value_vec item: {error}");
+                } else {
+                    println!("value_vec removed last item");
+                }
+            }
+            None => {}
+        }
+    }));
+
+    let value_map = states.value_map.items.clone();
+    callbacks.push(states.value_map.actions.reset_demo.connect_empty(move || {
+        if let Err(error) = value_map.set(default_map(), true) {
+            eprintln!("failed to reset value_map: {error}");
+        }
+    }));
+
+    let value_map = states.value_map.items.clone();
+    callbacks.push(states.value_map.actions.insert_next.connect_empty(
+        move || match value_map.get() {
+            Ok(current) => {
+                let next_key = current.keys().copied().max().unwrap_or(0) + 1;
+                let next_value = u32::from(next_key) * 100;
+                if let Err(error) = value_map.set_item(next_key, next_value, true) {
+                    eprintln!("failed to insert value_map item: {error}");
+                } else {
+                    println!("value_map inserted: {next_key} -> {next_value}");
+                }
+            }
+            Err(error) => eprintln!("failed to read value_map: {error}"),
+        },
+    ));
+
+    let value_map = states.value_map.items.clone();
+    callbacks.push(
+        states
+            .value_map
+            .actions
+            .remove_lowest
+            .connect_empty(move || match value_map.get() {
+                Ok(current) => {
+                    if let Some(lowest_key) = current.keys().copied().min() {
+                        if let Err(error) = value_map.remove_item(&lowest_key, true) {
+                            eprintln!("failed to remove value_map item: {error}");
+                        } else {
+                            println!("value_map removed key: {lowest_key}");
+                        }
+                    }
+                }
+                Err(error) => eprintln!("failed to read value_map: {error}"),
+            }),
+    );
+
+    callbacks
+}

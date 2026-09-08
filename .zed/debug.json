@@ -4,13 +4,13 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "label": "gui",
+    "label": "Showcase GUI",
     "adapter": "CodeLLDB",
     "build": {
       "command": "cargo",
-      "args": ["build", "-p", "gui", "--bin", "GuiTest"]
+      "args": ["build", "-p", "showcase_gui", "--bin", "showcase-gui"]
     },
-    "program": "$ZED_WORKTREE_ROOT/target/debug/GuiTest",
+    "program": "$ZED_WORKTREE_ROOT/target/debug/showcase-gui",
     "request": "launch",
     "env": {
       "WAYLAND_DISPLAY": ""
@@ -18,14 +18,9 @@
     "sourceLanguages": ["rust"]
   },
   {
-    "label": "server",
+    "label": "Showcase Python server",
     "adapter": "Debugpy",
     "request": "launch",
-    "module": "IPython",
-    "args": [
-      "-i",
-      "example/python/run.py",
-      "--matplotlib"
-    ]
+    "program": "$ZED_WORKTREE_ROOT/example/showcase/python/run.py"
   }
 ]

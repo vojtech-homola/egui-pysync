@@ -1,9 +1,0 @@
-[package]
-name = "gui_core"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-eframe = "0.36"
-egui = { version = "0.36", features = ["rayon"] }
-egui_states = { workspace = true }
