@@ -8,6 +8,7 @@ from .conftest import free_port, wait
 
 
 def test_example_with_native_client(request, example_server):
+    """Verify example defaults and actions through a native client connection."""
     name, module, server = example_server
     states = server.states
     observed = []
@@ -26,7 +27,11 @@ def test_example_with_native_client(request, example_server):
     port = free_port()
     server.start(port, (127, 0, 0, 1))
     result = subprocess.run(
-        [str(request.config._example_probe), str(port), name], capture_output=True, text=True, timeout=30
+        [str(request.config._example_probe), str(port), name],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert result.returncode == 0, f"{name}:\n{result.stdout}\n{result.stderr}"
     wait(lambda: observed == ([17, 42] if name == "counter" else [42]))

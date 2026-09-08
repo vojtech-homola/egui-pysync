@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.14"]
+requires = ["maturin>=1.15"]
 build-backend = "maturin"
 
 [project]
@@ -42,7 +42,6 @@ ignore = [
     "PLR2004", # magic-value-comparison
     "PLR0917", # too-many-positional
     "PLR0912", # too-many-branches
-    "D100",    # undocumented-public-module
 ]
 
 [tool.git-cliff.changelog]

@@ -18,6 +18,7 @@ from .conftest import ROOT, free_port
 @pytest.mark.parametrize("example", ["counter", "showcase"])
 @pytest.mark.parametrize("language", ["python", "rust"])
 def test_entrypoint_shutdown(request, example, language):
+    """Verify each server command exits cleanly and releases its port on SIGINT."""
     port = free_port()
     if language == "python":
         command = [sys.executable, "-u", str(ROOT / "example" / example / "python" / "run.py")]

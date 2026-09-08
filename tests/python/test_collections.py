@@ -2,6 +2,7 @@
 
 
 def test_vector_mutation(server_bundle):
+    """Verify vector replacement, append, removal, and clearing."""
     _, states, _ = server_bundle
     values = states.value_vec.items
     values.set([10, -3, 27], update=True)
@@ -15,6 +16,7 @@ def test_vector_mutation(server_bundle):
 
 
 def test_map_mutation(server_bundle):
+    """Verify map replacement, insertion, removal, and clearing."""
     _, states, _ = server_bundle
     values = states.value_map.items
     values.set({1: 100, 2: 200, 5: 500}, update=True)

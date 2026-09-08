@@ -16,7 +16,8 @@ DEFAULT_VEC = [10, -3, 27]
 DEFAULT_MAP = {1: 100, 2: 200, 5: 500}
 
 
-def register_callbacks(server: StatesServer) -> None:
+# Keep the showcase's callbacks together so the example is easy to follow.
+def register_callbacks(server: StatesServer) -> None:  # noqa: PLR0915
     """Connect logging and interactive actions to a server instance.
 
     Args:
@@ -110,7 +111,8 @@ def register_callbacks(server: StatesServer) -> None:
     states.value_map.actions.reset_demo.connect(_reset_value_map)
 
 
-def populate_initial_data(states: ShowcaseState) -> None:
+# Keep each state kind's initial values in one visible setup sequence.
+def populate_initial_data(states: ShowcaseState) -> None:  # noqa: PLR0915
     """Populate the same deterministic data as the Rust showcase.
 
     Args:

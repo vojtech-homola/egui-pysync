@@ -32,7 +32,7 @@ def configure(states):
         elif number == 4:
             st.take.set("", update=True)
             st.data.set(np.array([], dtype=np.uint8), update=True)
-        elif number in (10, 11, 12, 13):
+        elif number in {10, 11, 12, 13}:
 
             def send(second):
                 if number == 10:
@@ -62,6 +62,7 @@ def configure(states):
     "scenario", ["sync", "takes", "blocking-value", "blocking-empty", "blocking-data", "blocking-multi", "cache"]
 )
 def test_python_server_with_native_client(request, scenario):
+    """Verify the Python server against a shared native client scenario."""
     errors = []
     server = StatesServer(error_handler=errors.append)
     configure(server.states)
@@ -69,7 +70,11 @@ def test_python_server_with_native_client(request, scenario):
     try:
         server.start(port, (127, 0, 0, 1))
         result = subprocess.run(
-            [str(request.config._client_probe), str(port), scenario], capture_output=True, text=True, timeout=30
+            [str(request.config._client_probe), str(port), scenario],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert result.returncode == 0, f"{scenario}:\n{result.stdout}\n{result.stderr}"
     finally:

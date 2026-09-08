@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def pytest_configure(config):
+    """Build the example binaries and generate their Python bindings."""
     command = [
         "cargo",
         "build",
@@ -49,12 +50,14 @@ def pytest_configure(config):
 
 
 def free_port():
+    """Find an available port on the loopback interface."""
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
 
 def wait(predicate):
+    """Wait up to five seconds for an example callback's observable result."""
     deadline = time.monotonic() + 5
     while not predicate():
         assert time.monotonic() < deadline, "timed out waiting for example callback"
@@ -63,6 +66,7 @@ def wait(predicate):
 
 @pytest.fixture(params=["showcase", "counter"])
 def example_server(request):
+    """Yield a configured example server and check callback errors on teardown."""
     name = request.param
     directory = ROOT / "example" / name / "python"
     sys.path.insert(0, str(directory))
