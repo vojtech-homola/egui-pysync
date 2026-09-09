@@ -1,0 +1,16 @@
+[package]
+name = "counter_gui"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[bin]]
+name = "counter-gui"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.36"
+egui_states = { workspace = true }
+
+[build-dependencies]
+egui_states = { workspace = true, features = ["build_scripts"] }

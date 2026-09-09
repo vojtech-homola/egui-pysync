@@ -1,11 +1,11 @@
 [build]
-target = "./example/gui/index.html"
-dist = "./example/gui/web/"
+target = "./example/showcase/gui/index.html"
+dist = "./example/showcase/gui/web/"
 filehash = false
 
 [serve]
 port = 8090
 
 [watch]
-watch = ["./example/gui-core/", "./example/gui/", "./crates/egui-states/src/client/"]
-ignore = ["./example/gui/web/"]
+watch = ["./example/showcase/gui-core/", "./example/showcase/gui/", "./crates/egui-states/src/client/"]
+ignore = ["./example/showcase/gui/web/"]

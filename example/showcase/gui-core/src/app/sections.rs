@@ -1,0 +1,281 @@
+use crate::state::sections::{PrimaryChoice, Summary};
+
+use super::{
+    ViewState,
+    helpers::{
+        format_summary, primary_choice_label, show_primary_choice_selector,
+        show_secondary_choice_selector,
+    },
+};
+
+pub(super) fn show_values(ui: &mut egui::Ui, state: &mut ViewState) {
+    ui.collapsing("values", |ui| {
+        ui.label("Value<bool>: root.values.bool_value");
+        let mut bool_value = state.schema.values.bool_value.get();
+        if ui.checkbox(&mut bool_value, "bool_value").changed() {
+            state.schema.values.bool_value.set_signal(bool_value);
+        }
+
+        ui.separator();
+
+        ui.label("Value<i32>: root.values.count");
+        let mut count = state.schema.values.count.get();
+        if ui
+            .add(egui::DragValue::new(&mut count).prefix("count "))
+            .changed()
+        {
+            state.schema.values.count.set_signal(count);
+        }
+
+        ui.separator();
+
+        ui.label("ValueAtomic<f64>: root.values.ratio");
+        let mut ratio = state.schema.values.ratio.get();
+        if ui
+            .add(egui::Slider::new(&mut ratio, 0.0..=1.0).text("ratio"))
+            .changed()
+        {
+            state.schema.values.ratio.set_signal(ratio);
+        }
+
+        ui.separator();
+
+        ui.label("Value<f32, Queue>: root.values.queued_progress");
+        let mut queued_progress = state.schema.values.queued_progress.get();
+        if ui
+            .add(egui::Slider::new(&mut queued_progress, 0.0..=1.0).text("queued_progress"))
+            .changed()
+        {
+            state
+                .schema
+                .values
+                .queued_progress
+                .set_signal(queued_progress);
+        }
+
+        ui.separator();
+
+        ui.label("Value<String>: root.values.title");
+        let mut title = state.schema.values.title.get();
+        if ui.text_edit_singleline(&mut title).changed() {
+            state.schema.values.title.set_signal(title);
+        }
+
+        ui.separator();
+
+        ui.label("Value<Option<i32>>: root.values.optional_value");
+        let mut optional_value = state.schema.values.optional_value.get();
+        let previous_has_value = optional_value.is_some();
+        let mut has_value = previous_has_value;
+        let mut optional_changed = ui.checkbox(&mut has_value, "has value").changed();
+        if has_value && !previous_has_value {
+            optional_value = Some(0);
+        }
+        if !has_value {
+            optional_value = None;
+        }
+        if let Some(value) = optional_value.as_mut() {
+            optional_changed |= ui
+                .add(egui::DragValue::new(value).prefix("optional "))
+                .changed();
+        }
+        if optional_changed {
+            state
+                .schema
+                .values
+                .optional_value
+                .set_signal(optional_value);
+        }
+
+        ui.separator();
+
+        ui.label("Value<[u16; 3]>: root.values.fixed_numbers");
+        let mut fixed_numbers = state.schema.values.fixed_numbers.get();
+        let mut fixed_changed = false;
+        ui.horizontal(|ui| {
+            for value in &mut fixed_numbers {
+                fixed_changed |= ui.add(egui::DragValue::new(value)).changed();
+            }
+        });
+        if fixed_changed {
+            state.schema.values.fixed_numbers.set_signal(fixed_numbers);
+        }
+
+        ui.separator();
+
+        ui.label("Value<PrimaryChoice>: root.values.primary_choice");
+        let mut primary_choice = state.schema.values.primary_choice.get();
+        if show_primary_choice_selector(ui, &mut primary_choice) {
+            state
+                .schema
+                .values
+                .primary_choice
+                .set_signal(primary_choice);
+        }
+
+        ui.separator();
+
+        ui.label("Nested values: root.values.nested.*");
+        let mut secondary_choice = state.schema.values.nested.secondary_choice.get();
+        if show_secondary_choice_selector(ui, &mut secondary_choice) {
+            state
+                .schema
+                .values
+                .nested
+                .secondary_choice
+                .set_signal(secondary_choice);
+        }
+
+        let mut selected_enum = state.schema.values.nested.selected_enum.get();
+        let previous_has_value = selected_enum.is_some();
+        let mut has_value = previous_has_value;
+        let mut selected_changed = ui
+            .checkbox(&mut has_value, "selected enum has value")
+            .changed();
+        if has_value && !previous_has_value {
+            selected_enum = Some(PrimaryChoice::default());
+        }
+        if !has_value {
+            selected_enum = None;
+        }
+        if let Some(value) = selected_enum.as_mut() {
+            selected_changed |= show_primary_choice_selector(ui, value);
+        }
+        if selected_changed {
+            state
+                .schema
+                .values
+                .nested
+                .selected_enum
+                .set_signal(selected_enum);
+        }
+    });
+}
+
+pub(super) fn show_signals(ui: &mut egui::Ui, state: &mut ViewState) {
+    ui.collapsing("signals", |ui| {
+        ui.label("Signal<(), Queue>: root.signals.empty_signal");
+        if ui.button("emit empty signal").clicked() {
+            state.schema.signals.empty_signal.set(());
+        }
+
+        ui.separator();
+
+        ui.label("Signal<f64>: root.signals.number_signal");
+        ui.horizontal(|ui| {
+            ui.label("value");
+            ui.add(
+                egui::DragValue::new(&mut state.number_signal_value)
+                    .speed(0.1)
+                    .min_decimals(1),
+            );
+        });
+        if ui.button("emit number signal").clicked() {
+            state
+                .schema
+                .signals
+                .number_signal
+                .set(state.number_signal_value);
+        }
+        ui.separator();
+
+        ui.label("Signal<PrimaryChoice, Queue>: root.signals.enum_signal");
+        let mut enum_changed = false;
+        egui::ComboBox::from_label("variant")
+            .selected_text(primary_choice_label(state.enum_signal_value))
+            .show_ui(ui, |ui| {
+                enum_changed |= ui
+                    .selectable_value(&mut state.enum_signal_value, PrimaryChoice::A, "A")
+                    .changed();
+                enum_changed |= ui
+                    .selectable_value(&mut state.enum_signal_value, PrimaryChoice::B, "B")
+                    .changed();
+                enum_changed |= ui
+                    .selectable_value(&mut state.enum_signal_value, PrimaryChoice::C, "C")
+                    .changed();
+            });
+        if enum_changed {
+            state
+                .schema
+                .signals
+                .enum_signal
+                .set(state.enum_signal_value);
+        }
+    });
+}
+
+pub(super) fn show_statics(ui: &mut egui::Ui, state: &mut ViewState) {
+    ui.collapsing("static", |ui| {
+        ui.label("Static<String>: root.statics.status_text");
+        ui.label(state.schema.statics.status_text.get());
+
+        ui.separator();
+
+        ui.label("Static<Summary>: root.statics.summary");
+        let summary = state.schema.statics.summary.get();
+        ui.label(format_summary(&summary));
+
+        ui.separator();
+
+        ui.label("StaticAtomic<[f32; 2]>: root.statics.pair");
+        let pair = state.schema.statics.pair.get();
+        ui.label(format!("[{:.2}, {:.2}]", pair[0], pair[1]));
+
+        ui.separator();
+
+        ui.label("Nested static values: root.statics.nested.*");
+        ui.label(state.schema.statics.nested.label.get());
+        ui.label(format!(
+            "Enum hint: {}",
+            primary_choice_label(state.schema.statics.nested.enum_hint.get())
+        ));
+    });
+}
+
+pub(super) fn show_custom_values(ui: &mut egui::Ui, state: &mut ViewState) {
+    ui.collapsing("custom values", |ui| {
+        ui.label("Value<Point>: root.custom_values.point");
+        let mut point = state.schema.custom_values.point.get();
+        let mut point_changed = false;
+        ui.horizontal(|ui| {
+            point_changed |= ui
+                .add(egui::DragValue::new(&mut point.x).speed(0.1).prefix("x "))
+                .changed();
+            point_changed |= ui
+                .add(egui::DragValue::new(&mut point.y).speed(0.1).prefix("y "))
+                .changed();
+        });
+        point_changed |= ui.text_edit_singleline(&mut point.label).changed();
+        if point_changed {
+            state.schema.custom_values.point.set_signal(point);
+        }
+
+        ui.separator();
+
+        ui.label("Value<Option<Summary>>: root.custom_values.optional_struct");
+        let mut optional_struct = state.schema.custom_values.optional_struct.get();
+        let previous_has_value = optional_struct.is_some();
+        let mut has_value = previous_has_value;
+        let mut struct_changed = ui.checkbox(&mut has_value, "has value").changed();
+        if has_value && !previous_has_value {
+            optional_struct = Some(Summary::default());
+        }
+        if !has_value {
+            optional_struct = None;
+        }
+        if let Some(value) = optional_struct.as_mut() {
+            struct_changed |= ui.checkbox(&mut value.enabled, "enabled").changed();
+            struct_changed |= ui
+                .add(egui::DragValue::new(&mut value.level).prefix("level "))
+                .changed();
+            struct_changed |= ui.text_edit_singleline(&mut value.name).changed();
+        }
+        if struct_changed {
+            state
+                .schema
+                .custom_values
+                .optional_struct
+                .set_signal(optional_struct);
+        }
+    });
+}
