@@ -9,7 +9,7 @@ name = "counter-server"
 path = "main.rs"
 
 [dependencies]
-egui_states = { workspace = true, default-features = false, features = ["server"] }
+egui_states = { path = "../../../crates/egui-states", default-features = false, features = ["server"] }
 tokio = { version = "1.52", features = ["rt", "signal"] }
 
 [build-dependencies]
