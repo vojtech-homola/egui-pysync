@@ -25,10 +25,10 @@ client application version and the generated `StatesServer::VERSION_HASH` as
 the server version to reject mismatched state trees during the handshake.
 
 The state definition can be imported from a library crate or compiled from the
-same source module into both the GUI and build-script crates. The README
-compares [ways to organize state definitions and binding generation](../README.md#organizing-state-definitions-and-binding-generation),
-including a generator binary target and separate application-library and
-launcher packages.
+same source module into both the GUI and build-script crates. See the
+[counter build script](../example/counter/gui/build.rs) for a shared source
+module and the [showcase build script](../example/showcase/gui/build.rs) for
+an application library imported by a separate GUI launcher package.
 
 ## State directions
 
